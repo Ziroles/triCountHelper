@@ -6,10 +6,13 @@ RUN npm ci
 
 COPY . .
 
-ARG VITE_TRICOUNT_ENABLED=false
-ARG VITE_TRICOUNT_RELAY_URL=
-ENV VITE_TRICOUNT_ENABLED=$VITE_TRICOUNT_ENABLED \
-    VITE_TRICOUNT_RELAY_URL=$VITE_TRICOUNT_RELAY_URL
+# Ces valeurs sont intégrées au paquet livré et donc PUBLIQUES.
+# N'y placez jamais de secret : la clé Gemini et le jeton d'appareil vivent
+# côté API, pas dans le bundle.
+ARG VITE_API_URL=
+ARG VITE_SIGNUP_KEY=
+ENV VITE_API_URL=$VITE_API_URL \
+    VITE_SIGNUP_KEY=$VITE_SIGNUP_KEY
 
 RUN npm run build
 

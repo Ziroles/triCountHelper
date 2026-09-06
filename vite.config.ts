@@ -34,6 +34,12 @@ export default defineConfig({
       workbox: {
         globPatterns: ['**/*.{js,css,html,svg,png,ico,woff2}'],
         navigateFallback: 'index.html',
+        /* Sans cette exclusion, le service worker répondrait « index.html » à
+           une requête d'API et l'application recevrait du HTML là où elle
+           attend du JSON. Les réponses d'API ne sont pas non plus mises en
+           cache ici : le cache de lecture est tenu par l'application, qui sait
+           ce qui peut vieillir et ce qui ne le peut pas. */
+        navigateFallbackDenylist: [/^\/api\//],
         cleanupOutdatedCaches: true,
       },
       devOptions: { enabled: false },
@@ -41,5 +47,17 @@ export default defineConfig({
   ],
   build: {
     target: 'es2022',
+  },
+  server: {
+    /* L'application appelle « /api » ; en développement, on le mandate vers
+       l'API locale. Même origine qu'en production : le code n'a pas à savoir
+       s'il tourne en développement. */
+    proxy: {
+      '/api': {
+        target: 'http://localhost:8787',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api/, ''),
+      },
+    },
   },
 });
