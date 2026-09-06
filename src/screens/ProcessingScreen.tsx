@@ -1,11 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Screen } from '../ui/Screen';
 import { Button } from '../ui/Button';
-import { getImage } from '../db';
-import { ExtractionError, extractWithGemini } from '../extraction/gemini';
-import { uid } from '../lib/id';
+import * as api from '../api';
+import { ApiError } from '../api';
 import { useAppStore } from '../store/useAppStore';
-import type { Receipt, ReceiptLine } from '../types';
+import type { Receipt } from '../types';
 
 type ProcessingScreenProps = {
   receipt: Receipt;
@@ -14,66 +13,45 @@ type ProcessingScreenProps = {
 };
 
 type Phase =
-  | { kind: 'working'; label: string }
-  | { kind: 'error'; message: string; retryable: boolean };
+  | { kind: 'working' }
+  | { kind: 'error'; message: string; retryable: boolean; missingKey: boolean };
 
+/**
+ * Lecture du ticket par le modèle de vision, exécutée par l'API.
+ *
+ * Le serveur **écrit le résultat sur le ticket** avant de répondre. Concrètement :
+ * si l'écran est fermé ou si la connexion tombe pendant les quelques secondes du
+ * modèle, la lecture n'est pas perdue — rouvrir le ticket la montre. C'est ce
+ * que l'ancienne version, qui appelait Gemini depuis le navigateur, ne pouvait
+ * pas offrir.
+ */
 export function ProcessingScreen({ receipt, onBack, onDone }: ProcessingScreenProps) {
   const updateReceipt = useAppStore((s) => s.updateReceipt);
-  const settings = useAppStore((s) => s.settings);
   const navigate = useAppStore((s) => s.navigate);
-  const [phase, setPhase] = useState<Phase>({ kind: 'working', label: 'Chargement de la photo' });
+  const [phase, setPhase] = useState<Phase>({ kind: 'working' });
   const started = useRef(false);
 
   const toManualEntry = useCallback(() => {
-    updateReceipt(receipt.id, { step: 'verify' });
+    updateReceipt({ step: 'verify' });
     onDone();
-  }, [receipt.id, updateReceipt, onDone]);
+  }, [updateReceipt, onDone]);
 
   const run = useCallback(async () => {
-    setPhase({ kind: 'working', label: 'Chargement de la photo' });
+    setPhase({ kind: 'working' });
     try {
-      const image = await getImage(receipt.imageBlobKey);
-      if (!image) throw new ExtractionError("La photo n'est plus disponible.", false);
-
-      const result = await extractWithGemini(image, {
-        apiKey: settings.geminiApiKey,
-        model: settings.geminiModel,
-        onProgress: ({ label }) => setPhase({ kind: 'working', label }),
-      });
-
-      const lines: ReceiptLine[] = result.lines.map((line) => ({
-        id: uid(),
-        label: line.label,
-        description: line.description ?? null,
-        quantity: line.quantity,
-        unitPriceCents: line.unitPriceCents,
-        totalCents: line.totalCents,
-        taxCodes: line.taxCodes,
-        assignments: [],
-        confidence: line.confidence,
-        isManual: false,
-      }));
-
-      updateReceipt(receipt.id, (current) => ({
-        ...current,
-        lines,
-        taxes: result.taxes.map((tax) => ({ ...tax, id: uid() })),
-        merchant: current.merchant ?? result.merchant,
-        purchaseDate: current.purchaseDate ?? result.purchaseDate,
-        statedSubtotalCents: result.statedSubtotalCents,
-        statedTotalCents: result.statedTotalCents,
-        step: 'verify',
-      }));
+      const scanned = await api.scanReceipt(receipt.id);
+      updateReceipt(scanned);
       onDone();
     } catch (error) {
+      const missingKey = error instanceof ApiError && error.code === 'no_gemini_key';
       setPhase({
         kind: 'error',
-        message:
-          error instanceof ExtractionError ? error.message : "La lecture n'a pas abouti.",
-        retryable: error instanceof ExtractionError ? error.retryable : true,
+        message: error instanceof Error ? error.message : "La lecture n'a pas abouti.",
+        retryable: error instanceof ApiError ? error.retryable : true,
+        missingKey,
       });
     }
-  }, [receipt.id, receipt.imageBlobKey, settings.geminiApiKey, settings.geminiModel, updateReceipt, onDone]);
+  }, [receipt.id, updateReceipt, onDone]);
 
   useEffect(() => {
     if (started.current) return;
@@ -81,16 +59,14 @@ export function ProcessingScreen({ receipt, onBack, onDone }: ProcessingScreenPr
     void run();
   }, [run]);
 
-  const missingKey = settings.geminiApiKey.trim() === '';
-
   return (
     <Screen title="Lecture" onBack={onBack}>
       {phase.kind === 'error' ? (
         <div className="stack">
           <p className="warnText">{phase.message}</p>
           <p className="muted">
-            La saisie manuelle reste disponible : les lignes se corrigent aussi vite qu’elles
-            se tapent.
+            La saisie manuelle reste disponible : les lignes se corrigent aussi vite qu’elles se
+            tapent.
           </p>
           <div className="row row--gap">
             {phase.retryable ? (
@@ -98,7 +74,7 @@ export function ProcessingScreen({ receipt, onBack, onDone }: ProcessingScreenPr
                 Réessayer
               </Button>
             ) : null}
-            {missingKey ? (
+            {phase.missingKey ? (
               <Button full onClick={() => navigate({ name: 'settings' })}>
                 Ouvrir les réglages
               </Button>
@@ -110,12 +86,13 @@ export function ProcessingScreen({ receipt, onBack, onDone }: ProcessingScreenPr
         </div>
       ) : (
         <div className="stack stack--center">
-          <p className="progress__label">{phase.label}</p>
-          <div className="progress" role="progressbar" aria-label={phase.label}>
+          <p className="progress__label">Lecture du ticket</p>
+          <div className="progress" role="progressbar" aria-label="Lecture du ticket">
             <div className="progress__bar progress__bar--pulse" />
           </div>
           <p className="muted">
-            La photo est envoyée au service de lecture. Comptez quelques secondes.
+            Le serveur lit la photo. Comptez quelques secondes — le résultat est conservé même
+            si vous quittez cet écran.
           </p>
         </div>
       )}

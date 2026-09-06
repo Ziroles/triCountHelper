@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Screen } from '../ui/Screen';
 import { Button } from '../ui/Button';
 import { Banner } from '../ui/Banner';
@@ -6,6 +6,7 @@ import { Sheet } from '../ui/Sheet';
 import { AmountInput } from '../ui/AmountInput';
 import { PersonPill } from '../ui/PersonPill';
 import { useAppStore } from '../store/useAppStore';
+import { useGroupPeople } from '../hooks/useGroupPeople';
 import { formatCents } from '../lib/money';
 import { splitCents } from '../lib/split';
 import { uid } from '../lib/id';
@@ -26,14 +27,14 @@ function sameAssignment(line: ReceiptLine, ids: readonly string[]): boolean {
 }
 
 export function AssignScreen({ receipt, onBack, onDone }: AssignScreenProps) {
-  const people = useAppStore((s) => s.people);
-  const addPerson = useAppStore((s) => s.addPerson);
+  /* Les participants sont les membres du tricount : il n'y a plus personne à
+     ajouter ici. Quelqu'un qui manque s'ajoute dans Tricount, puis se récupère
+     par « Rafraîchir » sur l'écran du groupe — c'est là que la liste fait foi. */
+  const people = useGroupPeople();
   const updateReceipt = useAppStore((s) => s.updateReceipt);
 
-  const [selected, setSelected] = useState<string[]>(() => people.map((p) => p.id).slice(0, 1));
+  const [selected, setSelected] = useState<string[]>([]);
   const [sharesFor, setSharesFor] = useState<string | null>(null);
-  const [addingPerson, setAddingPerson] = useState(false);
-  const [newName, setNewName] = useState('');
   const [adjustmentOpen, setAdjustmentOpen] = useState(false);
   const [confirmUnassigned, setConfirmUnassigned] = useState(false);
   const rowRefs = useRef(new Map<string, HTMLLIElement>());
@@ -42,6 +43,15 @@ export function AssignScreen({ receipt, onBack, onDone }: AssignScreenProps) {
     () => receipt.lines.filter((line) => line.assignments.length === 0),
     [receipt.lines],
   );
+
+  /* Les membres arrivent du réseau : on présélectionne le premier dès qu'ils
+     sont là, pour que l'écran soit utilisable sans un geste préalable. */
+  const primed = useRef(false);
+  useEffect(() => {
+    if (primed.current || people.length === 0) return;
+    primed.current = true;
+    setSelected([people[0]!.id]);
+  }, [people]);
 
   const toggleSelected = (id: string) =>
     setSelected((current) =>
@@ -53,21 +63,21 @@ export function AssignScreen({ receipt, onBack, onDone }: AssignScreenProps) {
     const assignments: Assignment[] = sameAssignment(line, selected)
       ? []
       : selected.map((personId) => ({ personId, shares: 1 }));
-    updateReceipt(receipt.id, (current) => ({
+    updateReceipt((current) => ({
       ...current,
       lines: current.lines.map((item) => (item.id === line.id ? { ...item, assignments } : item)),
     }));
   };
 
   const setAssignments = (lineId: string, assignments: Assignment[]) => {
-    updateReceipt(receipt.id, (current) => ({
+    updateReceipt((current) => ({
       ...current,
       lines: current.lines.map((item) => (item.id === lineId ? { ...item, assignments } : item)),
     }));
   };
 
   const assignAll = (assignments: Assignment[]) => {
-    updateReceipt(receipt.id, (current) => ({
+    updateReceipt((current) => ({
       ...current,
       lines: current.lines.map((line) => ({ ...line, assignments: [...assignments] })),
     }));
@@ -99,7 +109,7 @@ export function AssignScreen({ receipt, onBack, onDone }: AssignScreenProps) {
             {unassigned.length} ligne{unassigned.length > 1 ? 's' : ''} non attribuée
             {unassigned.length > 1 ? 's' : ''}
             {people.length === 0
-              ? ' — ajoutez un participant, sinon elles resteront hors répartition'
+              ? ' — ce tricount n’a aucun participant, elles resteront hors répartition'
               : ` — partagée${unassigned.length > 1 ? 's' : ''} entre les ${people.length} participants`}
           </Banner>
         ) : null
@@ -126,21 +136,15 @@ export function AssignScreen({ receipt, onBack, onDone }: AssignScreenProps) {
               onClick={() => toggleSelected(person.id)}
             />
           ))}
-          <button
-            type="button"
-            className="pill pill--add"
-            aria-label="Ajouter un participant"
-            onClick={() => setAddingPerson(true)}
-          >
-            +
-          </button>
         </div>
         <p className="brush__hint">
-          {selected.length === 0
-            ? 'Sélectionnez au moins une personne, puis touchez les lignes.'
-            : selected.length === 1
-              ? 'Touchez les lignes à attribuer. Appui long : régler les parts.'
-              : `Touchez les lignes à partager entre ${selected.length} personnes.`}
+          {people.length === 0
+            ? 'Aucun participant dans ce tricount. Ajoutez-en dans Tricount, puis rafraîchissez depuis l’écran du groupe.'
+            : selected.length === 0
+              ? 'Sélectionnez au moins une personne, puis touchez les lignes.'
+              : selected.length === 1
+                ? 'Touchez les lignes à attribuer. Appui long : régler les parts.'
+                : `Touchez les lignes à partager entre ${selected.length} personnes.`}
           {people.length > 0
             ? ' Une ligne laissée sans attribution est partagée entre tout le monde.'
             : ''}
@@ -245,7 +249,7 @@ export function AssignScreen({ receipt, onBack, onDone }: AssignScreenProps) {
                   className="iconButton iconButton--quiet"
                   aria-label={`Supprimer ${adjustment.label}`}
                   onClick={() =>
-                    updateReceipt(receipt.id, (current) => ({
+                    updateReceipt((current) => ({
                       ...current,
                       adjustments: current.adjustments.filter((a) => a.id !== adjustment.id),
                     }))
@@ -271,44 +275,13 @@ export function AssignScreen({ receipt, onBack, onDone }: AssignScreenProps) {
         open={adjustmentOpen}
         onClose={() => setAdjustmentOpen(false)}
         onCreate={(adjustment) => {
-          updateReceipt(receipt.id, (current) => ({
+          updateReceipt((current) => ({
             ...current,
             adjustments: [...current.adjustments, adjustment],
           }));
           setAdjustmentOpen(false);
         }}
       />
-
-      <Sheet
-        open={addingPerson}
-        title="Nouveau participant"
-        onClose={() => setAddingPerson(false)}
-        footer={
-          <Button
-            variant="primary"
-            full
-            onClick={() => {
-              void addPerson(newName).then((person) => {
-                if (person) setSelected((current) => [...current, person.id]);
-              });
-              setNewName('');
-              setAddingPerson(false);
-            }}
-          >
-            Ajouter
-          </Button>
-        }
-      >
-        <label className="field">
-          <span className="field__label">Prénom</span>
-          <input
-            type="text"
-            value={newName}
-            autoFocus
-            onChange={(event) => setNewName(event.target.value)}
-          />
-        </label>
-      </Sheet>
 
       <Sheet
         open={confirmUnassigned}
@@ -360,7 +333,7 @@ type SharesSheetProps = {
 };
 
 function SharesSheet({ line, onClose, onChange }: SharesSheetProps) {
-  const people = useAppStore((s) => s.people);
+  const people = useGroupPeople();
   if (!line) return null;
 
   const assignments = line.assignments;
@@ -442,7 +415,7 @@ type AdjustmentSheetProps = {
 };
 
 function AdjustmentSheet({ open, onClose, onCreate }: AdjustmentSheetProps) {
-  const people = useAppStore((s) => s.people);
+  const people = useGroupPeople();
   const [label, setLabel] = useState('');
   const [amount, setAmount] = useState(0);
   const [negative, setNegative] = useState(true);

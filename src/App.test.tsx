@@ -1,32 +1,61 @@
-import { describe, expect, it, beforeEach } from 'vitest';
+import { describe, expect, it, beforeEach, vi } from 'vitest';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import App from './App';
-import { clearAllData } from './db';
-import { flushReceipts, useAppStore } from './store/useAppStore';
-import { DEFAULT_SETTINGS } from './types';
 
+vi.mock('./api', () => import('./test/fakeApi'));
+
+import App from './App';
+import { reset, seedGroup, state } from './test/fakeApi';
+import { resetForTests, useAppStore } from './store/useAppStore';
+import { DEFAULT_SERVER_SETTINGS, DEFAULT_SETTINGS } from './types';
+import { clearCache, forgetEverything } from './db';
+
+/**
+ * Parcours complet, du groupe au récapitulatif copiable.
+ *
+ * Ces scénarios sont ceux de la version locale, transposés : les participants
+ * ne sont plus saisis à la main mais viennent du tricount. Les montants
+ * attendus, eux, n'ont pas bougé d'un centime — c'est précisément ce qu'ils
+ * vérifient.
+ */
 describe('parcours complet, sans photo', () => {
   beforeEach(async () => {
-    await clearAllData();
+    reset();
+    resetForTests();
+    await forgetEverything();
+    seedGroup('Colocation', [
+      { uuid: 'm-mathieu', displayName: 'Mathieu' },
+      { uuid: 'm-lea', displayName: 'Léa' },
+    ]);
     useAppStore.setState({
       ready: false,
-      people: [],
+      groups: [],
+      group: null,
       receipts: [],
+      receipt: null,
       settings: DEFAULT_SETTINGS,
-      route: { name: 'home' },
+      server: DEFAULT_SERVER_SETTINGS,
+      route: { name: 'groups' },
       online: true,
+      saveState: 'idle',
+      saveError: null,
+      conflict: null,
     });
   });
 
   async function startManualReceipt(user: ReturnType<typeof userEvent.setup>) {
     render(<App />);
-    await screen.findByRole('button', { name: 'Nouveau ticket' });
-    await user.click(screen.getByRole('button', { name: 'Saisir un ticket à la main' }));
+    await user.click(await screen.findByText('Colocation'));
+    await user.click(await screen.findByRole('button', { name: 'Nouveau ticket' }));
+    await user.click(await screen.findByRole('button', { name: 'Saisir le ticket à la main' }));
     await screen.findByRole('heading', { name: 'Vérification' });
   }
 
-  async function fillAmount(user: ReturnType<typeof userEvent.setup>, field: HTMLElement, value: string) {
+  async function fillAmount(
+    user: ReturnType<typeof userEvent.setup>,
+    field: HTMLElement,
+    value: string,
+  ) {
     await user.clear(field);
     await user.type(field, value);
   }
@@ -63,25 +92,22 @@ describe('parcours complet, sans photo', () => {
     });
 
     await user.click(screen.getByRole('button', { name: 'Attribuer' }));
-
     await screen.findByRole('heading', { name: 'Attribution' });
-    for (const name of ['Mathieu', 'Léa']) {
-      await user.click(screen.getByRole('button', { name: 'Ajouter un participant' }));
-      await user.type(await screen.findByLabelText('Prénom'), name);
-      await user.click(screen.getByRole('button', { name: 'Ajouter' }));
-    }
 
-    await user.click(await screen.findByRole('button', { name: 'Léa' }));
-    await user.click(screen.getByText('Tartare'));
-    await user.click(screen.getByRole('button', { name: 'Léa' }));
-    await user.click(screen.getByRole('button', { name: 'Mathieu' }));
-    await user.click(screen.getByText('Pâtes'));
+    // Les participants sont déjà là : ils viennent du tricount, et le premier
+    // est présélectionné pour que l'écran soit utilisable sans geste préalable.
+    await screen.findByRole('button', { name: 'Léa' });
+    await user.click(screen.getByText('Tartare')); // → Mathieu, présélectionné
+    await user.click(screen.getByRole('button', { name: 'Mathieu' })); // on le retire
+    await user.click(screen.getByRole('button', { name: 'Léa' })); // on prend Léa
+    await user.click(screen.getByText('Pâtes')); // → Léa
 
     await waitFor(() => expect(screen.queryByText(/non attribuée/)).not.toBeInTheDocument());
     await user.click(screen.getByRole('button', { name: 'Voir les résultats' }));
 
     await screen.findByRole('heading', { name: 'Résultats' });
-    const mathieu = () => screen.getByRole('button', { name: 'Mathieu' }).closest('li') as HTMLElement;
+    const mathieu = () =>
+      screen.getByRole('button', { name: 'Mathieu' }).closest('li') as HTMLElement;
     expect(within(mathieu()).getByText('34,49 $')).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: '18 %' }));
@@ -127,16 +153,11 @@ describe('parcours complet, sans photo', () => {
     await user.click(screen.getByRole('button', { name: 'Attribuer' }));
     await screen.findByRole('heading', { name: 'Attribution' });
 
-    for (const name of ['Mathieu', 'Léa']) {
-      await user.click(screen.getByRole('button', { name: 'Ajouter un participant' }));
-      await user.type(await screen.findByLabelText('Prénom'), name);
-      await user.click(screen.getByRole('button', { name: 'Ajouter' }));
-    }
-    await user.click(await screen.findByRole('button', { name: 'Léa' }));
-    await user.click(screen.getByText('Bière'));
-    await user.click(screen.getByRole('button', { name: 'Léa' }));
+    await screen.findByRole('button', { name: 'Léa' });
+    await user.click(screen.getByText('Bière')); // → Mathieu, présélectionné
     await user.click(screen.getByRole('button', { name: 'Mathieu' }));
-    await user.click(screen.getByText('Pain'));
+    await user.click(screen.getByRole('button', { name: 'Léa' }));
+    await user.click(screen.getByText('Pain')); // → Léa
 
     await user.click(screen.getByRole('button', { name: 'Voir les résultats' }));
     await screen.findByRole('heading', { name: 'Résultats' });
@@ -167,24 +188,115 @@ describe('parcours complet, sans photo', () => {
     expect(screen.getByText('Écart de saisie')).toBeInTheDocument();
   });
 
-  it('restaure la session interrompue à l’étape où elle s’était arrêtée', async () => {
+  it('reprend un ticket là où il avait été laissé, depuis le serveur', async () => {
     const user = userEvent.setup();
     const { unmount } = render(<App />);
 
-    await screen.findByRole('button', { name: 'Nouveau ticket' });
-    await user.click(screen.getByRole('button', { name: 'Saisir un ticket à la main' }));
+    await user.click(await screen.findByText('Colocation'));
+    await user.click(await screen.findByRole('button', { name: 'Nouveau ticket' }));
+    await user.click(await screen.findByRole('button', { name: 'Saisir le ticket à la main' }));
     await screen.findByRole('heading', { name: 'Vérification' });
     await user.type(screen.getByPlaceholderText('Carrefour, boulangerie…'), 'Boulangerie');
     await user.click(screen.getByRole('button', { name: '+ Ajouter une ligne' }));
 
-    await flushReceipts();
+    await waitFor(() => {
+      const stored = [...state.receipts.values()][0];
+      expect(stored?.merchant).toBe('Boulangerie');
+      expect(stored?.lines).toHaveLength(1);
+    });
+
     unmount();
-    useAppStore.setState({ ready: false, people: [], receipts: [], route: { name: 'home' } });
+    // Un autre appareil : ni cache local, ni état en mémoire, ni adresse
+    // héritée. Tout ce qui s'affichera devra donc venir du serveur.
+    await clearCache();
+    resetForTests();
+    window.history.replaceState(null, '', '/');
+    useAppStore.setState({
+      ready: false,
+      groups: [],
+      group: null,
+      receipts: [],
+      receipt: null,
+      route: { name: 'groups' },
+    });
 
     render(<App />);
-    await screen.findByText('Boulangerie');
-    await user.click(screen.getByText('Boulangerie'));
+    await user.click(await screen.findByText('Colocation'));
+    await user.click(await screen.findByText('Boulangerie'));
     await screen.findByRole('heading', { name: 'Vérification' });
     expect(screen.getAllByLabelText('Libellé de la ligne')).toHaveLength(1);
+  });
+});
+
+/**
+ * Historique du navigateur.
+ *
+ * En PWA installée, le geste retour du système est la seule façon de reculer.
+ * Sans entrée d'historique, il quitte l'application — et le parcours compte
+ * désormais trois niveaux.
+ */
+describe('geste retour et adresses', () => {
+  beforeEach(async () => {
+    reset();
+    resetForTests();
+    await forgetEverything();
+    seedGroup('Colocation', [{ uuid: 'm-1', displayName: 'Mathieu' }]);
+    window.history.replaceState(null, '', '/');
+    useAppStore.setState({
+      ready: false,
+      groups: [],
+      group: null,
+      receipts: [],
+      receipt: null,
+      settings: DEFAULT_SETTINGS,
+      server: DEFAULT_SERVER_SETTINGS,
+      route: { name: 'groups' },
+      online: true,
+      saveState: 'idle',
+      conflict: null,
+    });
+  });
+
+  it('empile une adresse par écran', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole('button', { name: 'Réglages' }));
+    await waitFor(() => expect(window.location.pathname).toBe('/reglages'));
+
+    window.history.back();
+    await screen.findByText('Colocation');
+
+    await user.click(screen.getByText('Colocation'));
+    await waitFor(() => expect(window.location.pathname).toBe('/g/tTEST123456'));
+  });
+
+  it('recule d’un écran au lieu de quitter l’application', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByText('Colocation'));
+    await screen.findByRole('heading', { name: 'Colocation' });
+
+    window.history.back();
+
+    await waitFor(() => expect(useAppStore.getState().route.name).toBe('groups'));
+    await screen.findByRole('button', { name: 'Rejoindre un groupe' });
+  });
+
+  it('ouvre directement l’écran désigné par l’adresse', async () => {
+    window.history.replaceState(null, '', '/reglages');
+    render(<App />);
+
+    await screen.findByRole('heading', { name: 'Réglages' });
+    expect(useAppStore.getState().route).toEqual({ name: 'settings' });
+  });
+
+  it('retombe sur l’accueil pour une adresse inconnue', async () => {
+    window.history.replaceState(null, '', '/nimporte/quoi');
+    render(<App />);
+
+    await screen.findByRole('button', { name: 'Rejoindre un groupe' });
+    expect(useAppStore.getState().route).toEqual({ name: 'groups' });
   });
 });

@@ -2,10 +2,14 @@ import { describe, expect, it, beforeEach, vi } from 'vitest';
 import { StrictMode } from 'react';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+
+vi.mock('../api', () => import('../test/fakeApi'));
+
 import App from '../App';
-import { clearAllData, putImage, putReceipt } from '../db';
-import { emptyReceipt, useAppStore } from '../store/useAppStore';
-import { DEFAULT_SETTINGS, type ReceiptLine } from '../types';
+import { reset, seedGroup, seedImage, seedReceipt } from '../test/fakeApi';
+import { resetForTests, useAppStore } from '../store/useAppStore';
+import { DEFAULT_SERVER_SETTINGS, DEFAULT_SETTINGS, type ReceiptLine } from '../types';
+import { forgetEverything } from '../db';
 
 function lineOf(id: string): ReceiptLine {
   return {
@@ -23,14 +27,22 @@ function lineOf(id: string): ReceiptLine {
 
 describe('photo d’un ticket rouvert', () => {
   beforeEach(async () => {
-    await clearAllData();
+    reset();
+    resetForTests();
+    await forgetEverything();
+    seedGroup('Colocation', [{ uuid: 'm-1', displayName: 'Mathieu' }]);
     useAppStore.setState({
       ready: false,
-      people: [],
+      groups: [],
+      group: null,
       receipts: [],
+      receipt: null,
       settings: DEFAULT_SETTINGS,
-      route: { name: 'home' },
+      server: DEFAULT_SERVER_SETTINGS,
+      route: { name: 'groups' },
       online: true,
+      saveState: 'idle',
+      conflict: null,
     });
     Object.assign(URL, {
       createObjectURL: vi.fn(() => 'blob:ticket'),
@@ -39,15 +51,13 @@ describe('photo d’un ticket rouvert', () => {
   });
 
   async function openStoredReceipt() {
-    await putReceipt(
-      emptyReceipt({
-        merchant: 'Chez Victoire',
-        step: 'verify',
-        imageBlobKey: 'img-1',
-        lines: [lineOf('l1')],
-      }),
-    );
-    await putImage('img-1', new Blob(['photo'], { type: 'image/jpeg' }));
+    const receipt = seedReceipt('tTEST123456', {
+      merchant: 'Chez Victoire',
+      step: 'verify',
+      imageId: 'img-1',
+      lines: [lineOf('l1')],
+    });
+    seedImage(receipt.id, new Blob(['photo'], { type: 'image/jpeg' }));
 
     const user = userEvent.setup();
     render(
@@ -55,6 +65,7 @@ describe('photo d’un ticket rouvert', () => {
         <App />
       </StrictMode>,
     );
+    await user.click(await screen.findByText('Colocation'));
     await user.click(await screen.findByText('Chez Victoire'));
     await screen.findByRole('heading', { name: 'Vérification' });
     return user;
@@ -70,7 +81,7 @@ describe('photo d’un ticket rouvert', () => {
     expect(screen.queryByText(/Déposez une photo ici/)).not.toBeInTheDocument();
   });
 
-  it('rouvre le ticket depuis l’accueil sur sa photo, sans relancer la lecture', async () => {
+  it('rouvre le ticket sur sa photo, sans relancer la lecture', async () => {
     const user = await openStoredReceipt();
 
     // Le pas en arrière fige l’étape « capture » sur le ticket.

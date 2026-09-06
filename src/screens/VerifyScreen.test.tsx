@@ -1,55 +1,73 @@
-import { describe, expect, it, beforeEach } from 'vitest';
+import { describe, expect, it, beforeEach, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import App from '../App';
-import { clearAllData, putReceipt } from '../db';
-import { emptyReceipt, useAppStore } from '../store/useAppStore';
-import { DEFAULT_SETTINGS } from '../types';
 
+vi.mock('../api', () => import('../test/fakeApi'));
+
+import App from '../App';
+import { reset, seedGroup, seedReceipt } from '../test/fakeApi';
+import { resetForTests, useAppStore } from '../store/useAppStore';
+import { DEFAULT_SERVER_SETTINGS, DEFAULT_SETTINGS } from '../types';
+import { forgetEverything } from '../db';
+
+/**
+ * Les centimes d'une ligne, à travers l'interface.
+ *
+ * Ces cas décrivent un piège concret : 3 bières à 10,00 $ s'affichent 3 × 3,33,
+ * et repartir de ce prix unitaire arrondi ferait tomber la ligne à 9,99 $. Ce
+ * qui est vérifié ici, c'est qu'aucun aller-retour dans un champ ne fait perdre
+ * un centime.
+ */
 describe('centimes d’une ligne', () => {
   beforeEach(async () => {
-    await clearAllData();
+    reset();
+    resetForTests();
+    await forgetEverything();
+    seedGroup('Colocation', [{ uuid: 'm-1', displayName: 'Mathieu' }]);
     useAppStore.setState({
       ready: false,
-      people: [],
+      groups: [],
+      group: null,
       receipts: [],
+      receipt: null,
       settings: DEFAULT_SETTINGS,
-      route: { name: 'home' },
+      server: DEFAULT_SERVER_SETTINGS,
+      route: { name: 'groups' },
       online: true,
+      saveState: 'idle',
+      conflict: null,
     });
   });
 
-  /** 3 bières à 10,00 $ : le prix unitaire ne tombe pas juste, 10,00 / 3 = 3,33. */
   async function openLine() {
-    await putReceipt(
-      emptyReceipt({
-        merchant: 'Chez Victoire',
-        step: 'verify',
-        imageBlobKey: '',
-        statedTotalCents: 1000,
-        lines: [
-          {
-            id: 'l1',
-            label: 'Bière',
-            quantity: 3,
-            unitPriceCents: 333,
-            totalCents: 1000,
-            taxCodes: [],
-            assignments: [],
-            confidence: 100,
-            isManual: false,
-          },
-        ],
-      }),
-    );
+    seedReceipt('tTEST123456', {
+      merchant: 'Chez Victoire',
+      step: 'verify',
+      statedTotalCents: 1000,
+      lines: [
+        {
+          id: 'l1',
+          label: 'Bière',
+          quantity: 3,
+          unitPriceCents: 333,
+          totalCents: 1000,
+          taxCodes: [],
+          assignments: [],
+          confidence: 100,
+          isManual: false,
+        },
+      ],
+    });
+
     const user = userEvent.setup();
     render(<App />);
+    await user.click(await screen.findByText('Colocation'));
     await user.click(await screen.findByText('Chez Victoire'));
     await screen.findByRole('heading', { name: 'Vérification' });
     return user;
   }
 
-  const line = () => useAppStore.getState().receipts[0]?.lines[0];
+  const line = () => useAppStore.getState().receipt?.lines[0];
 
   it('ne perd pas un centime quand on traverse le champ sans rien changer', async () => {
     const user = await openLine();

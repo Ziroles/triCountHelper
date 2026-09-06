@@ -1,9 +1,45 @@
-import { DEFAULT_GEMINI_MODEL } from './extraction/model';
+/**
+ * Modèle de domaine du client.
+ *
+ * Un « participant » est désormais un membre du tricount : son `id` est l'uuid
+ * que Tricount lui donne. Le champ garde son nom de domaine — `personId` — plutôt
+ * que d'adopter `memberUuid` : `lib/compute.ts` répartit de l'argent entre des
+ * personnes, et n'a pas à savoir d'où ces personnes viennent. La traduction vers
+ * le vocabulaire de l'API se fait à la frontière, dans `api/receipts.ts`, et
+ * nulle part ailleurs.
+ */
 
 export type Person = {
   id: string;
   name: string;
   color?: string;
+};
+
+/** Membre d'un tricount, tel que l'API le rend. */
+export type Member = {
+  uuid: string;
+  displayName: string;
+  status: string;
+};
+
+/** Un groupe est un tricount ; son identifiant est le code d'invitation. */
+export type Group = {
+  id: string;
+  title: string;
+  currency: string;
+  members: Member[];
+  membersSyncedAt: string | null;
+  receiptCount: number;
+  lastActivityAt: string | null;
+};
+
+export type GroupSummary = {
+  id: string;
+  title: string;
+  currency: string;
+  memberCount: number;
+  receiptCount: number;
+  lastActivityAt: string | null;
 };
 
 export type ReceiptTax = {
@@ -48,6 +84,7 @@ export function regimeByCode(code: string): TaxRegime {
 }
 
 export type Assignment = {
+  /** Uuid du membre Tricount à qui revient cette part. */
   personId: string;
   shares: number;
 };
@@ -77,13 +114,20 @@ export type Adjustment = {
 
 export type ReceiptStatus = 'draft' | 'settled';
 
+export type ReceiptStep = 'capture' | 'processing' | 'verify' | 'assign' | 'results';
+
+export type TipBasis = 'subtotal' | 'total';
+
 export type Receipt = {
   id: string;
+  groupId: string;
   createdAt: string;
   updatedAt: string;
+  /** Verrou optimiste : le serveur refuse une écriture partie d'une version périmée. */
+  version: number;
+  imageId: string | null;
   merchant: string | null;
   purchaseDate: string | null;
-  imageBlobKey: string;
   lines: ReceiptLine[];
   taxes: ReceiptTax[];
   adjustments: Adjustment[];
@@ -95,34 +139,53 @@ export type Receipt = {
   step: ReceiptStep;
 };
 
-export type ReceiptStep = 'capture' | 'processing' | 'verify' | 'assign' | 'results';
+/** Vue allégée pour la liste des tickets d'un groupe. */
+export type ReceiptSummary = {
+  id: string;
+  groupId: string;
+  merchant: string | null;
+  purchaseDate: string | null;
+  status: ReceiptStatus;
+  step: ReceiptStep;
+  totalCents: number;
+  lineCount: number;
+  hasImage: boolean;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+};
 
-export type TipBasis = 'subtotal' | 'total';
-
+/**
+ * Réglages d'affichage, propres à l'appareil.
+ *
+ * La clé Gemini n'est plus ici : elle vit côté serveur, chiffrée, et ne
+ * redescend jamais entière. Voir `ServerSettings`.
+ */
 export type Settings = {
-  imageRetentionDays: number;
   taxRegimeCode: string;
   defaultTipPercent: number;
   defaultTipBasis: TipBasis;
-  geminiApiKey: string;
-  geminiModel: string;
-  tricountEnabled: boolean;
-  tricountShareUrl: string;
-  tricountRelayUrl: string;
-  tricountToken: string;
   theme: 'system' | 'light' | 'dark';
 };
 
 export const DEFAULT_SETTINGS: Settings = {
-  imageRetentionDays: 90,
   taxRegimeCode: DEFAULT_REGIME_CODE,
   defaultTipPercent: 18,
   defaultTipBasis: 'subtotal',
-  geminiApiKey: '',
-  geminiModel: DEFAULT_GEMINI_MODEL,
-  tricountEnabled: false,
-  tricountShareUrl: '',
-  tricountRelayUrl: '',
-  tricountToken: '',
   theme: 'system',
+};
+
+/** Réglages détenus par l'API pour le compte de cet utilisateur. */
+export type ServerSettings = {
+  hasGeminiKey: boolean;
+  geminiKeyHint: string | null;
+  serverHasGeminiKey: boolean;
+  geminiModel: string;
+};
+
+export const DEFAULT_SERVER_SETTINGS: ServerSettings = {
+  hasGeminiKey: false,
+  geminiKeyHint: null,
+  serverHasGeminiKey: false,
+  geminiModel: '',
 };

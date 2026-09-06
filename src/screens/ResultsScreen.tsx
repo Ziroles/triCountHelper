@@ -6,6 +6,7 @@ import { AmountInput } from '../ui/AmountInput';
 import { PersonPill } from '../ui/PersonPill';
 import { ShareIcon } from '../ui/ShareIcon';
 import { useAppStore } from '../store/useAppStore';
+import { useGroupPeople } from '../hooks/useGroupPeople';
 import { settle, tipForPercent } from '../lib/compute';
 import { formatCents, formatPercent } from '../lib/money';
 import { buildDetailedText, buildSummaryText, copyText, personAmountText } from '../lib/export';
@@ -20,7 +21,7 @@ type ResultsScreenProps = {
 };
 
 export function ResultsScreen({ receipt, onBack, onHome }: ResultsScreenProps) {
-  const people = useAppStore((s) => s.people);
+  const people = useGroupPeople();
   const updateReceipt = useAppStore((s) => s.updateReceipt);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
@@ -34,7 +35,7 @@ export function ResultsScreen({ receipt, onBack, onHome }: ResultsScreenProps) {
   );
 
   const setTipPercent = (percent: number) => {
-    updateReceipt(receipt.id, (current) => ({
+    updateReceipt((current) => ({
       ...current,
       tipCents: tipForPercent(current, current.tipBasis, percent),
     }));
@@ -98,7 +99,7 @@ export function ResultsScreen({ receipt, onBack, onHome }: ResultsScreenProps) {
             <Button
               full
               onClick={() => {
-                updateReceipt(receipt.id, {
+                updateReceipt({
                   status: receipt.status === 'settled' ? 'draft' : 'settled',
                 });
                 if (receipt.status !== 'settled') onHome();
@@ -221,7 +222,7 @@ export function ResultsScreen({ receipt, onBack, onHome }: ResultsScreenProps) {
           <Button
             full
             variant={receipt.tipCents === 0 ? 'primary' : 'secondary'}
-            onClick={() => updateReceipt(receipt.id, { tipCents: 0 })}
+            onClick={() => updateReceipt({ tipCents: 0 })}
           >
             Aucun
           </Button>
@@ -231,7 +232,7 @@ export function ResultsScreen({ receipt, onBack, onHome }: ResultsScreenProps) {
             <span className="field__label">Montant libre</span>
             <AmountInput
               valueCents={receipt.tipCents}
-              onChange={(cents) => updateReceipt(receipt.id, { tipCents: cents ?? 0 })}
+              onChange={(cents) => updateReceipt({ tipCents: cents ?? 0 })}
               aria-label="Montant du pourboire"
             />
           </label>
@@ -242,7 +243,7 @@ export function ResultsScreen({ receipt, onBack, onHome }: ResultsScreenProps) {
               aria-label="Base de calcul du pourboire"
               onChange={(event) => {
                 const tipBasis = event.target.value as typeof receipt.tipBasis;
-                updateReceipt(receipt.id, (current) => ({ ...current, tipBasis }));
+                updateReceipt((current) => ({ ...current, tipBasis }));
               }}
             >
               <option value="subtotal">le sous-total avant taxes</option>

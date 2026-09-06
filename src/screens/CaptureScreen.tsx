@@ -2,9 +2,16 @@ import { useEffect, useRef, useState } from 'react';
 import { Screen } from '../ui/Screen';
 import { Button } from '../ui/Button';
 import { CropBox } from '../ui/CropBox';
-import { FULL_CROP, normalizeCapture, rotateImage, type CropRect, type Rotation } from '../capture/image';
-import { getImage, putImage } from '../db';
-import { uid } from '../lib/id';
+import {
+  FULL_CROP,
+  downscaleForUpload,
+  normalizeCapture,
+  rotateImage,
+  type CropRect,
+  type Rotation,
+} from '../capture/image';
+import * as api from '../api';
+import { cacheImage, cachedImage } from '../db';
 import { useAppStore } from '../store/useAppStore';
 import type { Receipt } from '../types';
 
@@ -14,10 +21,21 @@ type CaptureScreenProps = {
   onDone: () => void;
   /** Repartir vers la vérification sans relancer la lecture, quand elle a déjà eu lieu. */
   onSkip?: (() => void) | undefined;
+  /** Sauter la photo et saisir le ticket à la main. */
+  onManual: () => void;
 };
 
-export function CaptureScreen({ receipt, onBack, onDone, onSkip }: CaptureScreenProps) {
+/**
+ * Photo du ticket : cadrage, rotation, envoi.
+ *
+ * Le recadrage et la réduction restent **côté client**, avant l'envoi. C'est le
+ * seul moyen de n'envoyer qu'un ticket net et léger sur un réseau mobile : une
+ * photo de 8 Mpx franchit rarement bien un tunnel de métro, et la partie utile
+ * en fait souvent moins d'un tiers.
+ */
+export function CaptureScreen({ receipt, onBack, onDone, onSkip, onManual }: CaptureScreenProps) {
   const updateReceipt = useAppStore((s) => s.updateReceipt);
+  const online = useAppStore((s) => s.online);
   const [original, setOriginal] = useState<Blob | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [rotation, setRotation] = useState<Rotation>(0);
@@ -29,23 +47,24 @@ export function CaptureScreen({ receipt, onBack, onDone, onSkip }: CaptureScreen
   const fileInput = useRef<HTMLInputElement>(null);
   const userPicked = useRef(false);
 
-  /* Le ticket garde sa photo en base : en revenant sur cet écran, on la remet
-     sous les yeux plutôt que de présenter une zone de dépôt vide. */
-  const storedKey = receipt.imageBlobKey;
+  /* Le ticket garde sa photo : en revenant sur cet écran, on la remet sous les
+     yeux plutôt que de présenter une zone de dépôt vide. */
+  const imageId = receipt.imageId;
   useEffect(() => {
-    if (!storedKey) return undefined;
+    if (!imageId) return undefined;
     let cancelled = false;
     void (async () => {
-      const blob = await getImage(storedKey);
-      // Une photo choisie entre-temps prime sur celle qui dormait en base.
+      const blob = (await cachedImage(receipt.id)) ?? (await api.readImage(receipt.id).catch(() => null));
+      // Une photo choisie entre-temps prime sur celle qui dormait en cache.
       if (cancelled || !blob || userPicked.current) return;
+      void cacheImage(receipt.id, blob);
       setOriginal(blob);
       setRestored(true);
     })();
     return () => {
       cancelled = true;
     };
-  }, [storedKey]);
+  }, [imageId, receipt.id]);
 
   useEffect(() => {
     let revoked: string | null = null;
@@ -88,12 +107,19 @@ export function CaptureScreen({ receipt, onBack, onDone, onSkip }: CaptureScreen
     try {
       const rotated = await rotateImage(original, rotation);
       const { blob } = await normalizeCapture(rotated, { crop });
-      const key = receipt.imageBlobKey || uid();
-      await putImage(key, blob);
-      updateReceipt(receipt.id, { imageBlobKey: key, step: 'processing' });
+      // On réduit une dernière fois juste avant l'envoi : c'est ce que le modèle
+      // recevra, autant que ce soit ce qui passe sur le réseau.
+      const upload = await downscaleForUpload(blob);
+      const saved = await api.uploadImage(receipt.id, upload);
+      void cacheImage(receipt.id, upload);
+      updateReceipt({ ...saved, step: 'processing' });
       onDone();
-    } catch {
-      setError("L'image n'a pas pu être préparée. Réessayez avec une autre photo.");
+    } catch (cause) {
+      setError(
+        cause instanceof Error
+          ? cause.message
+          : "L'image n'a pas pu être envoyée. Réessayez avec une autre photo.",
+      );
     } finally {
       setBusy(false);
     }
@@ -106,8 +132,8 @@ export function CaptureScreen({ receipt, onBack, onDone, onSkip }: CaptureScreen
       footer={
         preview ? (
           <>
-            <Button variant="primary" full disabled={busy} onClick={() => void confirm()}>
-              {busy ? 'Préparation…' : restored ? 'Relire le ticket' : 'Lire le ticket'}
+            <Button variant="primary" full disabled={busy || !online} onClick={() => void confirm()}>
+              {busy ? 'Envoi…' : restored ? 'Relire le ticket' : 'Lire le ticket'}
             </Button>
             {onSkip ? (
               <button type="button" className="linkButton linkButton--center" onClick={onSkip}>
@@ -123,9 +149,14 @@ export function CaptureScreen({ receipt, onBack, onDone, onSkip }: CaptureScreen
             </button>
           </>
         ) : (
-          <Button variant="primary" full onClick={() => fileInput.current?.click()}>
-            Prendre une photo
-          </Button>
+          <>
+            <Button variant="primary" full onClick={() => fileInput.current?.click()}>
+              Prendre une photo
+            </Button>
+            <button type="button" className="linkButton linkButton--center" onClick={onManual}>
+              Saisir le ticket à la main
+            </button>
+          </>
         )
       }
     >
@@ -171,6 +202,13 @@ export function CaptureScreen({ receipt, onBack, onDone, onSkip }: CaptureScreen
       )}
 
       {error ? <p className="warnText">{error}</p> : null}
+
+      {!online ? (
+        <p className="warnText">
+          Hors ligne : la photo ne peut pas être envoyée. La saisie à la main reste possible
+          dès que le réseau revient.
+        </p>
+      ) : null}
 
       {restored ? (
         <p className="muted">
