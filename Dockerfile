@@ -18,15 +18,7 @@ RUN npm run build
 
 FROM nginx:1.27-alpine AS runtime
 
-# Adresse de l'API vers laquelle /api/ est mandaté. Substituée au démarrage
-# dans le gabarit nginx (script 20-envsubst-on-templates.sh de l'image).
-# À redéfinir si le conteneur de l'API porte un autre nom :
-#   docker run -e SPLITTICKET_API=mon-api:8787 …
-ENV SPLITTICKET_API=tricount-api:8787 \
-    SPLITTICKET_RESOLVER=127.0.0.11 \
-    NGINX_ENVSUBST_FILTER=^SPLITTICKET_
-
-COPY docker/templates/ /etc/nginx/templates/
+COPY docker/nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /app/dist /usr/share/nginx/html
 
 EXPOSE 80
