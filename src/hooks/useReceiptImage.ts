@@ -3,14 +3,14 @@ import * as api from '../api';
 import { cacheImage, cachedImage } from '../db';
 
 /**
- * Photo d'un ticket, en objet URL prêt pour un `<img>`.
+ * A receipt's photo, as an object URL ready for an `<img>`.
  *
- * Le cache local répond en premier : rouvrir un ticket ne doit pas retélécharger
- * sa photo, ni la faire disparaître hors ligne. Le réseau ne sert qu'à combler
- * ce que le cache n'a pas.
+ * The local cache answers first: reopening a receipt must not re-download its
+ * photo, nor make it disappear offline. The network only fills in what the
+ * cache does not have.
  *
- * `imageId` fait partie des dépendances : une photo reprise change d'identifiant,
- * et c'est ce qui déclenche le rechargement.
+ * `imageId` is one of the dependencies: a retaken photo gets a new identifier,
+ * and that is what triggers the reload.
  */
 export function useReceiptImage(receiptId: string, imageId: string | null): string | null {
   const [url, setUrl] = useState<string | null>(null);

@@ -63,7 +63,7 @@ describe('résultats', () => {
           { personId: 'm-mathieu', shares: 1 },
           { personId: 'm-lea', shares: 1 },
         ]),
-        // Personne n'a réclamé le pain : il revient à tout le monde.
+        // Nobody claimed the bread: it goes to everyone.
         lineOf('l3', 'Pain', 400, []),
       ],
     });
@@ -79,7 +79,7 @@ describe('résultats', () => {
   it('répartit d’office la ligne que personne n’a prise', async () => {
     await openResults();
 
-    // 3000 + 1000 + 200 pour Mathieu, 1000 + 200 pour Léa : rien n'est perdu.
+    // 3000 + 1000 + 200 for Mathieu, 1000 + 200 for Léa: nothing is lost.
     expect(screen.getByText(/^42,00/)).toBeInTheDocument();
     expect(screen.getByText(/^12,00/)).toBeInTheDocument();
     expect(screen.getByText(/1 ligne non attribuée/).textContent).toMatch(
@@ -117,7 +117,7 @@ describe('résultats', () => {
       { memberUuid: 'm-mathieu', amountCents: 4200 },
       { memberUuid: 'm-lea', amountCents: 1200 },
     ]);
-    // Le garde-fou du serveur : la somme des parts doit tomber sur le total.
+    // The server's guard rail: the shares must add up to the total.
     expect(sent.shares.reduce((sum, share) => sum + share.amountCents, 0)).toBe(sent.totalCents);
   });
 });

@@ -8,12 +8,11 @@ import { forgetEverything } from '../db';
 import { DEFAULT_SERVER_SETTINGS, DEFAULT_SETTINGS } from '../types';
 
 /**
- * Comportement d'écriture du store.
+ * The store's write behaviour.
  *
- * Trois propriétés qui ne se voient pas à l'œil nu, et qui portent sur de
- * l'argent : les frappes ne se perdent pas pendant un enregistrement, un
- * conflit ne se résout pas tout seul, et hors ligne on refuse d'écrire plutôt
- * que de faire semblant.
+ * Three properties that are invisible to the naked eye, and that involve money:
+ * keystrokes are not lost during a save, a conflict does not resolve itself,
+ * and offline we refuse to write rather than pretend.
  */
 describe('enregistrement d’un ticket', () => {
   beforeEach(async () => {
@@ -59,10 +58,10 @@ describe('enregistrement d’un ticket', () => {
 
     useAppStore.getState().updateReceipt({ merchant: 'IG' });
     const flight = useAppStore.getState().saveNow();
-    // L'utilisateur continue de taper : la requête est déjà partie.
+    // The user keeps typing: the request has already gone out.
     useAppStore.getState().updateReceipt({ merchant: 'IGA EXTRA' });
     await flight;
-    // La requête différée repart avec la version fraîche, sans conflit.
+    // The deferred request goes out again with the fresh version, no conflict.
     await useAppStore.getState().saveNow();
 
     expect(useAppStore.getState().receipt?.merchant).toBe('IGA EXTRA');
@@ -73,7 +72,7 @@ describe('enregistrement d’un ticket', () => {
   it('signale un conflit sans écraser le travail de l’autre', async () => {
     const id = await open({ merchant: 'Origine' });
 
-    // Quelqu'un d'autre écrit pendant qu'on édite.
+    // Someone else writes while we are editing.
     const stored = state.receipts.get(id)!;
     state.receipts.set(id, { ...stored, merchant: 'Écrit ailleurs', version: 2 });
 
@@ -82,7 +81,7 @@ describe('enregistrement d’un ticket', () => {
 
     expect(useAppStore.getState().saveState).toBe('conflict');
     expect(useAppStore.getState().conflict?.merchant).toBe('Écrit ailleurs');
-    // Le serveur garde la version de l'autre : rien n'a été écrasé.
+    // The server keeps the other person's version: nothing was overwritten.
     expect(state.receipts.get(id)?.merchant).toBe('Écrit ailleurs');
   });
 
@@ -110,7 +109,7 @@ describe('enregistrement d’un ticket', () => {
 
     expect(useAppStore.getState().saveState).toBe('offline');
     expect(state.receipts.get(id)?.merchant).toBe('Origine');
-    // La saisie reste à l'écran : elle repartira au retour du réseau.
+    // The input stays on screen: it will go out again when the network returns.
     expect(useAppStore.getState().receipt?.merchant).toBe('Tapé dans le métro');
   });
 
@@ -122,16 +121,16 @@ describe('enregistrement d’un ticket', () => {
     await useAppStore.getState().refreshGroups();
 
     expect(useAppStore.getState().groups).toHaveLength(1);
-    // Une coupure réseau n'est pas une erreur à afficher : c'est un état.
+    // A network outage is not an error to display: it is a state.
     expect(useAppStore.getState().loadError).toBeNull();
   });
 });
 
 /**
- * Compatibilité des versions.
+ * Version compatibility.
  *
- * L'API et la PWA se déploient séparément. Une divergence silencieuse se
- * manifesterait par des échecs inexplicables, tard, chez l'utilisateur.
+ * The API and the PWA deploy separately. A silent mismatch would show up as
+ * inexplicable failures, late, on the user's device.
  */
 describe('contrat entre l’application et le serveur', () => {
   beforeEach(async () => {

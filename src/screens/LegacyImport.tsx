@@ -14,17 +14,17 @@ import { formatCents } from '../lib/money';
 import type { Assignment, Receipt } from '../types';
 
 /**
- * Reprise des tickets de l'ancienne version, stockés localement.
+ * Recovery of the previous version's receipts, stored locally.
  *
- * Code volontairement jetable, et isolé pour pouvoir l'être : il n'a de raison
- * d'exister que pour les utilisateurs qui avaient déjà des tickets avant que
- * ceux-ci ne vivent côté serveur. Proposé une fois, puis oublié.
+ * Deliberately throwaway code, and isolated so that it can be: it only has a
+ * reason to exist for users who already had receipts before those moved to the
+ * server side. Offered once, then forgotten.
  *
- * L'appariement des anciens participants avec les membres du tricount se fait
- * par nom — c'est justement la fragilité dont la refonte nous débarrasse, mais
- * ici il n'existe aucun autre indice. Ce qui ne s'apparie pas est **écarté de
- * l'attribution** plutôt que rattaché au hasard : une ligne sans propriétaire se
- * voit et se corrige, une ligne attribuée à la mauvaise personne, non.
+ * Matching the old participants with the tricount's members is done by name —
+ * exactly the fragility the rework gets rid of, but here there is no other
+ * clue. Whatever does not match is **left out of the assignment** rather than
+ * attached at random: a line with no owner is visible and gets corrected, a
+ * line assigned to the wrong person is not.
  */
 
 type LegacyLine = {
@@ -63,7 +63,7 @@ function normalizeName(value: string): string {
     .toLowerCase();
 }
 
-/** Ancien identifiant de personne → uuid du membre de même nom, quand il y en a un. */
+/** Old person identifier → uuid of the member with the same name, when there is one. */
 function buildNameMap(
   people: LegacyPerson[],
   members: { uuid: string; displayName: string }[],

@@ -1,14 +1,14 @@
 /**
- * Correspondance entre une `Route` et une adresse.
+ * Mapping between a `Route` and an address.
  *
- * Sans historique, le geste retour du système quitte l'application installée au
- * lieu de reculer d'un écran — et la refonte a fait passer le parcours de un à
- * trois niveaux, ce qui rend le défaut trois fois plus pénible.
+ * Without history, the system's back gesture leaves the installed app instead
+ * of stepping back one screen — and the rework took the journey from one level
+ * to three, which makes the flaw three times as annoying.
  *
- * Le parsing est **tolérant en lecture, strict en écriture** : une adresse
- * inconnue, tronquée ou dont l'étape n'existe pas retombe sur l'accueil plutôt
- * que d'ouvrir un écran incohérent. Une adresse peut venir d'un signet vieux de
- * six mois, d'un partage, ou d'une faute de frappe.
+ * Parsing is **lenient on read, strict on write**: an unknown or truncated
+ * address, or one whose step does not exist, falls back to the home screen
+ * rather than opening an inconsistent one. An address may come from a
+ * six-month-old bookmark, from a share, or from a typo.
  */
 
 import type { ReceiptStep } from '../types';
@@ -22,7 +22,7 @@ function isStep(value: string): value is ReceiptStep {
   return (STEPS as readonly string[]).includes(value);
 }
 
-/** Route → chemin. Les identifiants sont encodés : un code de partage est opaque. */
+/** Route → path. Identifiers are encoded: a share code is opaque. */
 export function routeToPath(route: Route): string {
   switch (route.name) {
     case 'groups':
@@ -40,7 +40,7 @@ export function routeToPath(route: Route): string {
   }
 }
 
-/** Chemin → route, ou l'accueil si le chemin ne décrit rien de connu. */
+/** Path → route, or the home screen if the path describes nothing known. */
 export function pathToRoute(pathname: string): Route {
   const parts = pathname.split('/').filter((part) => part !== '');
 
@@ -55,8 +55,8 @@ export function pathToRoute(pathname: string): Route {
     if (parts[2] === 't' && parts[3]) {
       const receiptId = decodeURIComponent(parts[3]);
       const step = parts[4] ?? '';
-      // Une étape absente ou inventée : on ouvre le ticket à la vérification,
-      // qui est utilisable quel que soit son état d'avancement.
+      // A missing or made-up step: open the receipt at verification, which is
+      // usable whatever its stage of progress.
       return {
         name: 'receipt',
         groupId,

@@ -3,12 +3,12 @@ import { fromWire, toWire, type WireReceipt } from './wire';
 import type { Receipt } from '../types';
 
 /**
- * La frontière domaine ↔ API.
+ * The domain ↔ API boundary.
  *
- * Un seul champ change de nom (`personId` ↔ `memberUuid`), mais il est niché
- * dans deux collections imbriquées. C'est exactement le genre de traduction
- * qu'on oublie d'appliquer à moitié — d'où ces tests, qui vérifient surtout
- * l'aller-retour complet.
+ * A single field changes name (`personId` ↔ `memberUuid`), but it sits inside
+ * two nested collections. It is exactly the kind of translation one forgets to
+ * apply in half the places — hence these tests, which mostly check the full
+ * round trip.
  */
 
 const receipt: Receipt = {
@@ -64,7 +64,7 @@ describe('traduction domaine ↔ API', () => {
       { memberUuid: 'm-mathieu', shares: 1 },
     ]);
     expect(wire.adjustments[0]?.assignments).toEqual([{ memberUuid: 'm-lea', shares: 1 }]);
-    // Aucun `personId` ne doit fuir sur le fil.
+    // No `personId` must leak onto the wire.
     expect(JSON.stringify(wire)).not.toContain('personId');
   });
 

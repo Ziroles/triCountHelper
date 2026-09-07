@@ -2,10 +2,13 @@ import { useState } from 'react';
 import { Button } from '../../ui/Button';
 import { useGroupPeople } from '../../hooks/useGroupPeople';
 import { receiptTitle } from '../../lib/export';
+import { logger } from '../../lib/log';
 import { personById } from '../../lib/people';
 import * as api from '../../api';
 import type { Settlement } from '../../lib/compute';
 import type { Receipt } from '../../types';
+
+const log = logger('tricount');
 
 type TricountPanelProps = {
   receipt: Receipt;
@@ -19,14 +22,14 @@ type Status =
   | { kind: 'failed'; message: string };
 
 /**
- * Envoi de la dépense dans le tricount du groupe.
+ * Sends the expense into the group's tricount.
  *
- * Ce panneau ne demande plus ni adresse de relais, ni jeton, ni lien de partage :
- * le groupe *est* le tricount, et le serveur sait où écrire. Il ne reste qu'une
- * question à poser — qui a payé.
+ * This panel no longer asks for a relay address, a token or a share link: the
+ * group *is* the tricount, and the server knows where to write. Only one
+ * question is left to ask — who paid.
  *
- * Les parts partent avec les **uuid** des membres. L'appariement par nom, qui
- * échouait sur un accent ou une majuscule, n'existe plus.
+ * The shares go out with the members' **uuids**. Matching by name, which failed
+ * on an accent or a capital letter, is gone.
  */
 export function TricountPanel({ receipt, settlement }: TricountPanelProps) {
   const people = useGroupPeople();
@@ -48,6 +51,16 @@ export function TricountPanel({ receipt, settlement }: TricountPanelProps) {
 
   const send = async () => {
     setStatus({ kind: 'busy' });
+    /* A send to a third-party system, and therefore irreversible from here: the
+       trace must make it possible to reconstruct what went out, share by share,
+       if the tricount displays something other than what was expected. */
+    const done = log.time(`sending the expense for receipt ${receipt.id}`);
+    log.info('sending to the tricount', {
+      receipt: receipt.id,
+      payer: activePayer,
+      totalCents: settlement.distributedTotalCents,
+      shares,
+    });
     try {
       const { transactionId } = await api.pushExpense(receipt.id, {
         description: receiptTitle(receipt),
@@ -56,8 +69,10 @@ export function TricountPanel({ receipt, settlement }: TricountPanelProps) {
         shares,
         date: receipt.purchaseDate,
       });
+      done(`transaction ${transactionId}`);
       setStatus({ kind: 'done', transactionId });
     } catch (error) {
+      log.error('send to the tricount failed', error);
       setStatus({
         kind: 'failed',
         message:

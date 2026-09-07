@@ -4,11 +4,11 @@ import { Button } from '../ui/Button';
 import { useAppStore } from '../store/useAppStore';
 
 /**
- * Rejoindre un groupe en collant un lien de partage Tricount.
+ * Join a group by pasting a Tricount share link.
  *
- * Le lien complet et le code nu marchent tous les deux : l'utilisateur colle ce
- * qu'il a sous la main, et refuser un code au motif qu'il lui manque un nom de
- * domaine serait une chicane, pas une validation.
+ * The full link and the bare code both work: the user pastes whatever they have
+ * to hand, and refusing a code because it is missing a domain name would be
+ * nitpicking, not validation.
  */
 export function JoinGroupScreen() {
   const navigate = useAppStore((s) => s.navigate);

@@ -1,16 +1,16 @@
 /**
- * API simulée pour les tests d'écran.
+ * Fake API for the screen tests.
  *
- * Elle tient en mémoire ce que le vrai serveur tient en SQLite, avec les mêmes
- * règles là où elles comptent pour l'interface : le verrou optimiste, le
- * refus hors ligne, et l'écriture du résultat de lecture sur le ticket.
+ * It holds in memory what the real server holds in SQLite, with the same rules
+ * where they matter to the interface: the optimistic lock, the offline refusal,
+ * and writing the reading's result onto the receipt.
  *
- * Les tests s'en servent ainsi :
+ * Tests use it like this:
  *
  *     vi.mock('../api', () => import('../test/fakeApi'));
  *
- * `state` étant un singleton de module, le test et le code testé voient le même
- * serveur simulé.
+ * Since `state` is a module singleton, the test and the code under test see the
+ * same simulated server.
  */
 
 import { ApiError, OfflineError } from '../api/client';
@@ -32,13 +32,13 @@ type FakeState = {
   images: Map<string, Blob>;
   settings: ServerSettings;
   accountEmail: string | null;
-  /** Résultat que `scanReceipt` appliquera au ticket, ou une erreur à lever. */
+  /** Result `scanReceipt` will apply to the receipt, or an error to throw. */
   scanResult: Partial<Receipt> | null;
   scanError: ApiError | null;
-  /** Journal des dépenses envoyées vers Tricount. */
+  /** Log of the expenses sent to Tricount. */
   pushed: { receiptId: string; payload: unknown }[];
   offline: boolean;
-  /** Version annoncée par le serveur simulé. */
+  /** Version announced by the simulated server. */
   contractVersion: string;
 };
 
@@ -85,7 +85,7 @@ function guard(): void {
   if (state.offline) throw new OfflineError();
 }
 
-/** Installe un groupe et ses membres, comme si l'utilisateur l'avait rejoint. */
+/** Seeds a group and its members, as if the user had joined it. */
 export function seedGroup(
   title: string,
   members: { uuid: string; displayName: string }[],
@@ -104,12 +104,12 @@ export function seedGroup(
   return group;
 }
 
-/** Installe une photo déjà envoyée pour un ticket. */
+/** Seeds a photo already uploaded for a receipt. */
 export function seedImage(receiptId: string, blob: Blob): void {
   state.images.set(receiptId, blob);
 }
 
-/** Installe un ticket déjà rempli, pour ouvrir un écran sans le traverser. */
+/** Seeds an already-filled receipt, to open a screen without walking through it. */
 export function seedReceipt(groupId: string, partial: Partial<Receipt> = {}): Receipt {
   const now = new Date().toISOString();
   const receipt: Receipt = {
@@ -157,7 +157,7 @@ function summarize(receipt: Receipt): ReceiptSummary {
   };
 }
 
-// ── Surface appelée par l'application ────────────────────────────────────────
+// ── Surface called by the application ────────────────────────────────────────
 
 export async function health() {
   return {

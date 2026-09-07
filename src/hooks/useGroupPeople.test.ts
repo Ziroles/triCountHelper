@@ -33,9 +33,9 @@ describe('participants du groupe', () => {
     ]);
   });
 
-  /* Le tableau alimente les dépendances de `useMemo` autour de `settle()`.
-     Une identité neuve à chaque rendu ferait recalculer toute la répartition
-     à chaque frappe dans le champ de pourboire. */
+  /* The array feeds the `useMemo` dependencies around `settle()`. A fresh
+     identity on every render would recompute the whole split on every keystroke
+     in the tip field. */
   it('garde la même identité de tableau tant que le groupe ne change pas', () => {
     const { result, rerender } = renderHook(() => useGroupPeople());
     const first = result.current;

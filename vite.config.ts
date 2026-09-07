@@ -1,10 +1,12 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
+import { devLogPlugin } from './tools/vite-plugin-dev-log';
 
 export default defineConfig({
   plugins: [
     react(),
+    devLogPlugin(),
     VitePWA({
       registerType: 'prompt',
       includeAssets: ['icons/*.png', 'favicon.svg'],
@@ -34,11 +36,11 @@ export default defineConfig({
       workbox: {
         globPatterns: ['**/*.{js,css,html,svg,png,ico,woff2}'],
         navigateFallback: 'index.html',
-        /* Sans cette exclusion, le service worker répondrait « index.html » à
-           une requête d'API et l'application recevrait du HTML là où elle
-           attend du JSON. Les réponses d'API ne sont pas non plus mises en
-           cache ici : le cache de lecture est tenu par l'application, qui sait
-           ce qui peut vieillir et ce qui ne le peut pas. */
+        /* Without this exclusion, the service worker would answer "index.html"
+           to an API request and the application would receive HTML where it
+           expects JSON. API responses are not cached here either: the read
+           cache is held by the application, which knows what may go stale and
+           what may not. */
         navigateFallbackDenylist: [/^\/api\//],
         cleanupOutdatedCaches: true,
       },
@@ -49,14 +51,31 @@ export default defineConfig({
     target: 'es2022',
   },
   server: {
-    /* L'application appelle « /api » ; en développement, on le mandate vers
-       l'API locale. Même origine qu'en production : le code n'a pas à savoir
-       s'il tourne en développement. */
+    /* The application calls "/api"; in development we proxy that to the local
+       API. Same origin as in production: the code does not have to know whether
+       it is running in development. */
     proxy: {
       '/api': {
         target: 'http://localhost:8787',
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api/, ''),
+        /* The proxy's point of view is the only one that tells "the API
+           answered an error" from "the API is not there": from the browser, the
+           two look alike. It is almost always the second. */
+        configure: (proxy) => {
+          proxy.on('proxyReq', (proxyReq, req) => {
+            console.log(`  → api  ${req.method} ${req.url}`);
+          });
+          proxy.on('proxyRes', (proxyRes, req) => {
+            const status = proxyRes.statusCode ?? 0;
+            const mark = status >= 500 ? '!!' : status >= 400 ? ' !' : '  ';
+            console.log(`${mark}← api  ${req.method} ${req.url} → ${status}`);
+          });
+          proxy.on('error', (error, req) => {
+            console.log(`!! api  ${req.method} ${req.url} — unreachable: ${error.message}`);
+            console.log('        is the API running on http://localhost:8787 ?');
+          });
+        },
       },
     },
   },

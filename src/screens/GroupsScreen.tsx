@@ -9,11 +9,11 @@ import { formatFrenchDate } from '../lib/export';
 import type { GroupSummary } from '../types';
 
 /**
- * Accueil : les groupes de l'utilisateur.
+ * Home: the user's groups.
  *
- * Un groupe est un tricount. On en rejoint un en collant son lien de partage,
- * et ses participants viennent avec — c'est tout le propos : plus personne ne
- * ressaisit à la main la liste des gens avec qui il partage ses courses.
+ * A group is a tricount. You join one by pasting its share link, and its
+ * participants come along with it — that is the whole point: nobody retypes by
+ * hand the list of people they split their shopping with.
  */
 
 function GroupRow({

@@ -1,9 +1,9 @@
 /**
- * Opérations de l'API, groupées par ressource.
+ * API operations, grouped by resource.
  *
- * Chaque fonction est une requête, sans état ni cache : c'est le store qui
- * décide quand appeler et quoi garder. Ce découpage rend les écrans testables
- * en simulant ce module, sans toucher au réseau.
+ * Each function is a request, with no state and no cache: the store decides
+ * when to call and what to keep. This split makes the screens testable by
+ * mocking this module, without touching the network.
  */
 
 import { API_BASE, request, requestBlob } from './client';
@@ -29,14 +29,14 @@ export type Health = {
   imageRetentionDays: number;
 };
 
-/** `/health` est la seule route ouverte : elle ne demande pas de jeton. */
+/** `/health` is the only open route: it does not require a token. */
 export async function health(): Promise<Health> {
   const response = await fetch(`${API_BASE}/health`, { headers: { accept: 'application/json' } });
   if (!response.ok) throw new Error(`health ${response.status}`);
   return (await response.json()) as Health;
 }
 
-// ── Identité et réglages ─────────────────────────────────────────────────────
+// ── Identity and settings ────────────────────────────────────────────────────
 
 export type Me = {
   deviceId: string;
@@ -60,7 +60,7 @@ export const createAccount = (email: string, password: string): Promise<Me> =>
 export const openSession = (email: string, password: string): Promise<Me> =>
   request<Me>('/v1/sessions', { method: 'POST', body: { email, password } });
 
-// ── Groupes ──────────────────────────────────────────────────────────────────
+// ── Groups ───────────────────────────────────────────────────────────────────
 
 export const listGroups = (): Promise<GroupSummary[]> => request('/v1/groups');
 
@@ -79,7 +79,7 @@ export const refreshMembers = (groupId: string): Promise<Group> =>
 export const leaveGroup = (groupId: string): Promise<void> =>
   request(`/v1/groups/${encodeURIComponent(groupId)}`, { method: 'DELETE' });
 
-// ── Tickets ──────────────────────────────────────────────────────────────────
+// ── Receipts ─────────────────────────────────────────────────────────────────
 
 export const listReceipts = (groupId: string): Promise<ReceiptSummary[]> =>
   request(`/v1/groups/${encodeURIComponent(groupId)}/receipts`);
@@ -121,10 +121,11 @@ export const readImage = (receiptId: string): Promise<Blob | null> =>
   requestBlob(`/v1/receipts/${encodeURIComponent(receiptId)}/image`);
 
 /**
- * Lance la lecture OCR. Le serveur écrit le résultat sur le ticket avant de
- * répondre : si la requête n'aboutit pas, rouvrir le ticket montre quand même
- * la lecture. Le délai est large — un modèle de vision prend une poignée de
- * secondes, et l'abandonner trop tôt gaspille l'appel qui a déjà été payé.
+ * Starts the OCR pass. The server writes the result onto the receipt before
+ * answering: if the request does not complete, reopening the receipt still
+ * shows the reading. The timeout is generous — a vision model takes a handful
+ * of seconds, and giving up too early wastes a call that has already been paid
+ * for.
  */
 export async function scanReceipt(receiptId: string): Promise<Receipt> {
   const wire = await request<WireReceipt>(`/v1/receipts/${encodeURIComponent(receiptId)}/scan`, {

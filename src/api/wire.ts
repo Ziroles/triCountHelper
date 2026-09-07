@@ -1,17 +1,17 @@
 /**
- * Frontière entre le vocabulaire du domaine et celui de l'API.
+ * Boundary between the domain's vocabulary and the API's.
  *
- * Une seule chose diffère, mais elle est partout : une part est attribuée à un
- * `personId` côté domaine, à un `memberUuid` sur le fil. Les deux portent la
- * même valeur — l'uuid d'un membre Tricount — et chaque nom est juste chez lui :
+ * Only one thing differs, but it is everywhere: a share is assigned to a
+ * `personId` on the domain side, to a `memberUuid` on the wire. Both carry the
+ * same value — the uuid of a Tricount member — and each name is right at home:
  *
- *  - `lib/compute.ts` répartit de l'argent entre des personnes. Lui parler de
- *    Tricount ferait entrer l'intégration dans le noyau de calcul, qui n'en a
- *    aucun besoin et qui est la partie la plus testée de l'application.
- *  - le serveur, lui, valide ces identifiants contre les membres réels du
- *    tricount. `memberUuid` y est le nom honnête.
+ *  - `lib/compute.ts` splits money between people. Talking to it about Tricount
+ *    would pull the integration into the computation core, which has no need of
+ *    it and which is the most heavily tested part of the application.
+ *  - the server, for its part, validates those identifiers against the tricount's
+ *    real members. `memberUuid` is the honest name there.
  *
- * La traduction tient dans ce fichier, et dans ce fichier seulement.
+ * The translation fits in this file, and in this file only.
  */
 
 import type { Adjustment, Assignment, Receipt, ReceiptLine } from '../types';
@@ -32,7 +32,7 @@ const toWireAssignments = (assignments: Assignment[]): WireAssignment[] =>
 const fromWireAssignments = (assignments: WireAssignment[] | undefined): Assignment[] =>
   (assignments ?? []).map(({ memberUuid, shares }) => ({ personId: memberUuid, shares }));
 
-/** Ticket du domaine → corps de requête. */
+/** Domain receipt → request body. */
 export function toWire(receipt: Receipt): WireReceipt {
   return {
     ...receipt,
@@ -47,7 +47,7 @@ export function toWire(receipt: Receipt): WireReceipt {
   };
 }
 
-/** Réponse de l'API → ticket du domaine. */
+/** API response → domain receipt. */
 export function fromWire(wire: WireReceipt): Receipt {
   return {
     ...wire,

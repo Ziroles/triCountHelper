@@ -3,12 +3,12 @@ import { peopleOf, useAppStore } from '../store/useAppStore';
 import type { Person } from '../types';
 
 /**
- * Participants du groupe courant, avec une **identité de tableau stable**.
+ * The current group's participants, with a **stable array identity**.
  *
- * `peopleOf` construit un tableau neuf à chaque appel. Utilisé directement dans
- * le corps d'un composant, il fait échouer tous les `useMemo` qui en dépendent —
- * et `settle()` se retrouve recalculé à chaque frappe dans le champ de
- * pourboire. Le mémo tient ici, une fois, pour tous les écrans.
+ * `peopleOf` builds a fresh array on every call. Used directly in a component
+ * body, it breaks every `useMemo` that depends on it — and `settle()` ends up
+ * recomputed on every keystroke in the tip field. The memo lives here, once,
+ * for every screen.
  */
 export function useGroupPeople(): Person[] {
   const group = useAppStore((s) => s.group);

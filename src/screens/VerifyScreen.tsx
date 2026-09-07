@@ -24,9 +24,9 @@ type QuantityInputProps = {
   onChange: (quantity: number) => void;
 };
 
-/* Vider le champ pour retaper une quantité ne doit pas faire passer la ligne par
-   « 1 unité » : ce détour rebaserait le prix unitaire et emporterait des centimes.
-   Le champ garde donc sa saisie en cours et ne publie que les quantités valides. */
+/* Clearing the field to retype a quantity must not take the line through
+   "1 unit": that detour would rebase the unit price and carry off a few cents.
+   So the field keeps its in-progress input and only publishes valid quantities. */
 function QuantityInput({ value, onChange }: QuantityInputProps) {
   const [draft, setDraft] = useState(() => String(value));
   const focused = useRef(false);
@@ -102,9 +102,9 @@ export function VerifyScreen({ receipt, onBack, onDone }: VerifyScreenProps) {
   const setQuantity = (line: ReceiptLine, quantity: number) => {
     const safe = Number.isFinite(quantity) && quantity > 0 ? Math.floor(quantity) : 1;
     if (safe === line.quantity) return;
-    /* Le prix unitaire affiché est un arrondi : 3 bières à 10,00 $ s'affichent
-       3 × 3,33. Repartir de lui ferait tomber la ligne à 9,99 $. On remet donc à
-       l'échelle le total réel, seul montant qui figure sur le ticket. */
+    /* The displayed unit price is a rounding: 3 beers at $10.00 show as
+       3 × 3.33. Starting from it would drop the line to $9.99. So we rescale the
+       real total, the only amount that appears on the receipt. */
     const totalCents = roundHalfUp((line.totalCents / Math.max(1, line.quantity)) * safe);
     patchLine(line.id, {
       quantity: safe,
@@ -125,7 +125,7 @@ export function VerifyScreen({ receipt, onBack, onDone }: VerifyScreenProps) {
   const setTotal = (line: ReceiptLine, totalCents: number) => {
     patchLine(line.id, {
       totalCents,
-      // Le total saisi fait foi ; le prix unitaire n'en est que l'affichage arrondi.
+      // The entered total is authoritative; the unit price is only its rounded display.
       unitPriceCents: roundHalfUp(totalCents / Math.max(1, line.quantity)),
       isManual: true,
     });

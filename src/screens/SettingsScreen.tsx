@@ -14,12 +14,12 @@ function formatBytes(bytes: number): string {
 }
 
 /**
- * Réglages.
+ * Settings.
  *
- * Deux natures de réglages cohabitent, et la distinction est visible à l'écran :
- * ce qui appartient à cet appareil (thème, valeurs par défaut) et ce que le
- * serveur détient pour vous (clé Gemini, compte). La clé n'est jamais réaffichée
- * — seulement quelques caractères, assez pour reconnaître laquelle est en place.
+ * Two kinds of settings live side by side, and the distinction is visible on
+ * screen: what belongs to this device (theme, defaults) and what the server
+ * holds for you (Gemini key, account). The key is never shown again — only a
+ * few characters, enough to recognise which one is in place.
  */
 export function SettingsScreen() {
   const navigate = useAppStore((s) => s.navigate);
@@ -38,7 +38,7 @@ export function SettingsScreen() {
   const [storage, setStorage] = useState<{ usage: number; quota: number } | null>(null);
   const [confirmWipe, setConfirmWipe] = useState(false);
 
-  // Compte optionnel.
+  // Optional account.
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [accountStatus, setAccountStatus] = useState<string | null>(null);
@@ -124,8 +124,8 @@ export function SettingsScreen() {
             <span className="muted"> — ces noms changent, demandez la liste à jour</span>
           </span>
           {models === null ? (
-            /* Saisie libre tant qu'on n'a pas la liste : on ne publie qu'à la
-               sortie du champ, pour ne pas écrire au serveur à chaque frappe. */
+            /* Free-form entry until we have the list: we only publish on field
+               blur, so as not to write to the server on every keystroke. */
             <input
               type="text"
               autoComplete="off"

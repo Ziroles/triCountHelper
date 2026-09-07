@@ -1,16 +1,19 @@
 /**
- * Client HTTP de l'API SplitTicket.
+ * HTTP client for the SplitTicket API.
  *
- * Deux responsabilités, et rien d'autre : porter le jeton d'appareil, et
- * transformer une réponse d'erreur en quelque chose qu'un écran peut afficher.
+ * Two responsibilities, and nothing else: carry the device token, and turn an
+ * error response into something a screen can display.
  *
- * L'enrôlement est automatique et silencieux : au premier appel, l'appareil
- * demande un jeton et le garde. L'utilisateur n'a ni compte à créer ni mot de
- * passe à choisir pour se servir de l'application — c'est le point du modèle
- * « identité par appareil ».
+ * Enrolment is automatic and silent: on the first call the device asks for a
+ * token and keeps it. The user has no account to create and no password to
+ * choose in order to use the app — that is the whole point of the
+ * "identity per device" model.
  */
 
 import { getDeviceToken, setDeviceToken } from '../db';
+import { logger } from '../lib/log';
+
+const log = logger('api');
 
 const RAW_BASE = (import.meta.env.VITE_API_URL as string | undefined)?.trim() ?? '';
 export const API_BASE = (RAW_BASE === '' ? '/api' : RAW_BASE).replace(/\/+$/, '');
@@ -18,16 +21,20 @@ export const API_BASE = (RAW_BASE === '' ? '/api' : RAW_BASE).replace(/\/+$/, ''
 const SIGNUP_KEY = ((import.meta.env.VITE_SIGNUP_KEY as string | undefined) ?? '').trim();
 
 /**
- * Version du contrat HTTP attendue par cette application.
+ * Version of the HTTP contract this app expects.
  *
- * L'API et la PWA se déploient séparément. Sans ce garde-fou, une version en
- * retard sur l'autre ne se remarque qu'au moment où une route répond autre
- * chose que prévu — c'est-à-dire tard, et à l'utilisateur. À incrémenter en
- * même temps que `CONTRACT_VERSION` côté serveur.
+ * The API and the PWA ship separately. Without this guard rail, one falling
+ * behind the other only shows up when a route answers something other than
+ * what was expected — that is, late, and to the user. Bump it at the same time
+ * as `CONTRACT_VERSION` on the server side.
  */
 export const CONTRACT_VERSION = '1';
 
-/** Erreur d'API déjà formulée pour l'utilisateur. */
+/* The first question in front of a failing call is "what was it talking to?".
+   Might as well answer it before it gets asked. */
+log.info('client ready', { base: API_BASE, contract: CONTRACT_VERSION, signupKey: SIGNUP_KEY !== '' });
+
+/** API error already phrased for the user. */
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -58,8 +65,8 @@ type Detail = { code?: string; reason?: string; retryable?: boolean; [key: strin
 function readDetail(body: unknown): Detail {
   if (typeof body !== 'object' || body === null) return {};
   const record = body as Record<string, unknown>;
-  // FastAPI enveloppe nos erreurs dans `detail` ; les erreurs de validation y
-  // mettent un tableau, qu'on ne cherche pas à traduire mot à mot.
+  // FastAPI wraps our errors in `detail`; validation errors put an array in
+  // there, which we do not try to translate word for word.
   const detail = record.detail ?? record;
   if (Array.isArray(detail)) return { code: 'invalid_request', reason: 'Requête invalide.' };
   return typeof detail === 'object' && detail !== null ? (detail as Detail) : {};
@@ -77,20 +84,23 @@ function messageForStatus(status: number): string {
 
 let enrolling: Promise<string> | null = null;
 
-/** Jeton de cet appareil, en l'enrôlant à la première demande. */
+/** Token for this device, enrolling it on first request. */
 export async function deviceToken(): Promise<string> {
   const existing = await getDeviceToken();
   if (existing) return existing;
 
-  // Un seul enrôlement à la fois : deux écrans qui démarrent ensemble ne
-  // doivent pas créer deux appareils pour un seul téléphone.
+  // One enrolment at a time: two screens starting together must not create two
+  // devices for a single phone.
   if (enrolling === null) {
+    log.info('enrolling this device');
+    const done = log.time('enrolment');
     enrolling = (async () => {
       const headers: Record<string, string> = { 'content-type': 'application/json' };
       if (SIGNUP_KEY !== '') headers['x-signup-key'] = SIGNUP_KEY;
       const response = await fetch(`${API_BASE}/v1/devices`, { method: 'POST', headers });
       if (!response.ok) {
         const detail = readDetail(await response.json().catch(() => null));
+        log.error('enrolment refused', { status: response.status, code: detail.code });
         throw new ApiError(
           detail.reason ??
             (response.status === 401
@@ -103,6 +113,7 @@ export async function deviceToken(): Promise<string> {
       }
       const body = (await response.json()) as { token: string };
       await setDeviceToken(body.token);
+      done('device enrolled');
       return body.token;
     })().finally(() => {
       enrolling = null;
@@ -114,14 +125,20 @@ export async function deviceToken(): Promise<string> {
 type RequestOptions = {
   method?: string;
   body?: unknown;
-  /** Corps déjà formé (upload de photo) : on ne touche pas au content-type. */
+  /** Body already built (photo upload): leave the content-type alone. */
   form?: FormData;
   signal?: AbortSignal;
   timeoutMs?: number;
 };
 
 export async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
-  if (typeof navigator !== 'undefined' && !navigator.onLine) throw new OfflineError();
+  const method = options.method ?? 'GET';
+  const done = log.time(`${method} ${path}`);
+
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    log.warn(`${method} ${path} — offline, request not attempted`);
+    throw new OfflineError();
+  }
 
   const token = await deviceToken();
   const headers: Record<string, string> = { authorization: `Bearer ${token}` };
@@ -133,8 +150,8 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
     body = JSON.stringify(options.body);
   }
 
-  // Un abandon interne ne doit pas annuler l'abandon demandé par l'appelant :
-  // on écoute le sien, on déclenche le nôtre.
+  // An internal abort must not cancel the abort the caller asked for: we listen
+  // to theirs, we trigger ours.
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? 30000);
   options.signal?.addEventListener('abort', () => controller.abort(), { once: true });
@@ -148,24 +165,44 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
       signal: controller.signal,
     });
   } catch (error) {
-    if (options.signal?.aborted) throw error;
+    if (options.signal?.aborted) {
+      done('aborted by caller');
+      throw error;
+    }
+    const timedOut = controller.signal.aborted;
+    log.error(`${method} ${path} — ${timedOut ? 'timed out' : 'server unreachable'}`, {
+      base: API_BASE,
+      timeoutMs: options.timeoutMs ?? 30000,
+      cause: error,
+    });
     throw new ApiError(
-      controller.signal.aborted
+      timedOut
         ? 'Le serveur a mis trop de temps à répondre.'
         : 'Le serveur n’a pas pu être joint. Vérifiez la connexion.',
       0,
-      controller.signal.aborted ? 'timeout' : 'network',
+      timedOut ? 'timeout' : 'network',
       true,
     );
   } finally {
     clearTimeout(timer);
   }
 
-  if (response.status === 204) return undefined as T;
+  if (response.status === 204) {
+    done('204');
+    return undefined as T;
+  }
 
   const payload = await response.json().catch(() => null);
   if (!response.ok) {
     const detail = readDetail(payload);
+    // A 409 is expected (optimistic lock), a 5xx is not: the level follows that
+    // difference, so the terminal can be skimmed.
+    const report = response.status >= 500 || response.status === 0 ? log.error : log.warn;
+    report(`${method} ${path} → ${response.status}`, {
+      code: detail.code,
+      reason: detail.reason,
+      retryable: detail.retryable,
+    });
     throw new ApiError(
       detail.reason ?? messageForStatus(response.status),
       response.status,
@@ -174,14 +211,25 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
       detail,
     );
   }
+  done(String(response.status));
   return payload as T;
 }
 
 export async function requestBlob(path: string): Promise<Blob | null> {
-  if (typeof navigator !== 'undefined' && !navigator.onLine) return null;
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    log.debug(`GET ${path} — offline, no blob`);
+    return null;
+  }
+  const done = log.time(`GET ${path} (blob)`);
   const token = await deviceToken();
   const response = await fetch(`${API_BASE}${path}`, {
     headers: { authorization: `Bearer ${token}` },
   });
-  return response.ok ? await response.blob() : null;
+  if (!response.ok) {
+    log.warn(`GET ${path} → ${response.status}, no blob`);
+    return null;
+  }
+  const blob = await response.blob();
+  done(`${response.status}, ${Math.round(blob.size / 1024)} KiB`);
+  return blob;
 }

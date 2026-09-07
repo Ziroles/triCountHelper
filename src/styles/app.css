@@ -672,7 +672,7 @@ input::placeholder {
 }
 
 .pill {
-  /* Repli pour les pastilles sans personne derrière (le bouton « + »). */
+  /* Fallback for pills with nobody behind them (the "+" button). */
   --pill-color: var(--ink-muted);
   flex: none;
   width: var(--touch);
@@ -680,7 +680,7 @@ input::placeholder {
   border-radius: 50%;
   display: grid;
   place-items: center;
-  /* Non sélectionnée : la teinte reste lisible en contour et en texte. */
+  /* Unselected: the hue stays legible as an outline and as text. */
   border: 2px solid var(--pill-color);
   background: color-mix(in srgb, var(--pill-color) 14%, var(--surface));
   color: var(--pill-color);
@@ -701,7 +701,7 @@ input::placeholder {
   border-width: 1px;
 }
 
-/* Sélectionnée, ou simple badge de lecture : la teinte est pleine. */
+/* Selected, or a plain read-only badge: the hue is solid. */
 .pill--on,
 .pill--sm {
   background: var(--pill-color);
@@ -713,7 +713,7 @@ input::placeholder {
   box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--pill-color);
 }
 
-/* Répartition par défaut : la personne n'a pas été désignée à la main. */
+/* Default split: the person was not picked by hand. */
 .pill--ghost {
   background: none;
   border-style: dashed;
@@ -947,7 +947,7 @@ input::placeholder {
   color: var(--ink);
 }
 
-/* Réserve la même gouttière aux lignes qui n'en ont pas (taxes, pourboire). */
+/* Reserves the same gutter for rows that have none (taxes, tip). */
 .shareIcon--none {
   visibility: hidden;
 }

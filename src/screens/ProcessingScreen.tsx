@@ -3,8 +3,11 @@ import { Screen } from '../ui/Screen';
 import { Button } from '../ui/Button';
 import * as api from '../api';
 import { ApiError } from '../api';
+import { logger } from '../lib/log';
 import { useAppStore } from '../store/useAppStore';
 import type { Receipt } from '../types';
+
+const log = logger('scan');
 
 type ProcessingScreenProps = {
   receipt: Receipt;
@@ -17,13 +20,13 @@ type Phase =
   | { kind: 'error'; message: string; retryable: boolean; missingKey: boolean };
 
 /**
- * Lecture du ticket par le modèle de vision, exécutée par l'API.
+ * Reading of the receipt by the vision model, run by the API.
  *
- * Le serveur **écrit le résultat sur le ticket** avant de répondre. Concrètement :
- * si l'écran est fermé ou si la connexion tombe pendant les quelques secondes du
- * modèle, la lecture n'est pas perdue — rouvrir le ticket la montre. C'est ce
- * que l'ancienne version, qui appelait Gemini depuis le navigateur, ne pouvait
- * pas offrir.
+ * The server **writes the result onto the receipt** before answering. In
+ * practice: if the screen is closed or the connection drops during the model's
+ * few seconds, the reading is not lost — reopening the receipt shows it. That
+ * is what the previous version, which called Gemini from the browser, could not
+ * offer.
  */
 export function ProcessingScreen({ receipt, onBack, onDone }: ProcessingScreenProps) {
   const updateReceipt = useAppStore((s) => s.updateReceipt);
@@ -38,12 +41,23 @@ export function ProcessingScreen({ receipt, onBack, onDone }: ProcessingScreenPr
 
   const run = useCallback(async () => {
     setPhase({ kind: 'working' });
+    /* The vision model takes a few seconds and costs a call. Its duration is
+       the only measure that says whether an "it's slow" comes from it or from
+       something else; and the number of lines read says straight away whether
+       the result is worth anything, without opening the next screen. */
+    const done = log.time(`reading receipt ${receipt.id}`);
+    log.info('reading requested from the server', { receipt: receipt.id });
     try {
       const scanned = await api.scanReceipt(receipt.id);
+      done(
+        `${scanned.lines.length} lines, ${scanned.taxes.length} taxes, ` +
+          `stated total ${scanned.statedTotalCents ?? '—'}`,
+      );
       updateReceipt(scanned);
       onDone();
     } catch (error) {
       const missingKey = error instanceof ApiError && error.code === 'no_gemini_key';
+      log.error(missingKey ? 'reading impossible: no Gemini key' : 'reading failed', error);
       setPhase({
         kind: 'error',
         message: error instanceof Error ? error.message : "La lecture n'a pas abouti.",

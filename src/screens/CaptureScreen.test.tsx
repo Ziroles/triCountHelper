@@ -84,7 +84,7 @@ describe('photo d’un ticket rouvert', () => {
   it('rouvre le ticket sur sa photo, sans relancer la lecture', async () => {
     const user = await openStoredReceipt();
 
-    // Le pas en arrière fige l’étape « capture » sur le ticket.
+    // Stepping back pins the "capture" step onto the receipt.
     await user.click(screen.getByRole('button', { name: 'Retour' }));
     await screen.findByRole('heading', { name: 'Photo du ticket' });
     await user.click(screen.getByRole('button', { name: 'Retour' }));

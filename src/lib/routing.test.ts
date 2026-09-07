@@ -30,9 +30,8 @@ describe('adresses', () => {
     expect(pathToRoute(routeToPath(route))).toEqual(route);
   });
 
-  /* Une adresse peut venir d'un signet vieux de six mois, d'un partage ou d'une
-     faute de frappe : elle doit retomber sur ses pieds, pas ouvrir un écran
-     incohérent. */
+  /* An address may come from a six-month-old bookmark, from a share or from a
+     typo: it must land on its feet, not open an inconsistent screen. */
   it.each(['/inconnu', '/g', '/g/', '/x/tABC', '/g/tABC/t', '/g/tABC/z/r1'])(
     'retombe sur l’accueil pour « %s »',
     (path) => {

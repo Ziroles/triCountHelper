@@ -1,12 +1,12 @@
 /**
- * Modèle de domaine du client.
+ * The client's domain model.
  *
- * Un « participant » est désormais un membre du tricount : son `id` est l'uuid
- * que Tricount lui donne. Le champ garde son nom de domaine — `personId` — plutôt
- * que d'adopter `memberUuid` : `lib/compute.ts` répartit de l'argent entre des
- * personnes, et n'a pas à savoir d'où ces personnes viennent. La traduction vers
- * le vocabulaire de l'API se fait à la frontière, dans `api/receipts.ts`, et
- * nulle part ailleurs.
+ * A "participant" is now a member of the tricount: their `id` is the uuid
+ * Tricount gives them. The field keeps its domain name — `personId` — rather
+ * than adopting `memberUuid`: `lib/compute.ts` splits money between people, and
+ * has no business knowing where those people come from. The translation to the
+ * API's vocabulary happens at the boundary, in `api/receipts.ts`, and nowhere
+ * else.
  */
 
 export type Person = {
@@ -15,14 +15,14 @@ export type Person = {
   color?: string;
 };
 
-/** Membre d'un tricount, tel que l'API le rend. */
+/** Member of a tricount, as the API returns it. */
 export type Member = {
   uuid: string;
   displayName: string;
   status: string;
 };
 
-/** Un groupe est un tricount ; son identifiant est le code d'invitation. */
+/** A group is a tricount; its identifier is the invitation code. */
 export type Group = {
   id: string;
   title: string;
@@ -84,7 +84,7 @@ export function regimeByCode(code: string): TaxRegime {
 }
 
 export type Assignment = {
-  /** Uuid du membre Tricount à qui revient cette part. */
+  /** Uuid of the Tricount member this share belongs to. */
   personId: string;
   shares: number;
 };
@@ -123,7 +123,7 @@ export type Receipt = {
   groupId: string;
   createdAt: string;
   updatedAt: string;
-  /** Verrou optimiste : le serveur refuse une écriture partie d'une version périmée. */
+  /** Optimistic lock: the server refuses a write started from a stale version. */
   version: number;
   imageId: string | null;
   merchant: string | null;
@@ -139,7 +139,7 @@ export type Receipt = {
   step: ReceiptStep;
 };
 
-/** Vue allégée pour la liste des tickets d'un groupe. */
+/** Lightweight view for a group's receipt list. */
 export type ReceiptSummary = {
   id: string;
   groupId: string;
@@ -156,10 +156,10 @@ export type ReceiptSummary = {
 };
 
 /**
- * Réglages d'affichage, propres à l'appareil.
+ * Display settings, specific to the device.
  *
- * La clé Gemini n'est plus ici : elle vit côté serveur, chiffrée, et ne
- * redescend jamais entière. Voir `ServerSettings`.
+ * The Gemini key is no longer here: it lives on the server, encrypted, and
+ * never comes back down in full. See `ServerSettings`.
  */
 export type Settings = {
   taxRegimeCode: string;
@@ -175,7 +175,7 @@ export const DEFAULT_SETTINGS: Settings = {
   theme: 'system',
 };
 
-/** Réglages détenus par l'API pour le compte de cet utilisateur. */
+/** Settings held by the API on this user's behalf. */
 export type ServerSettings = {
   hasGeminiKey: boolean;
   geminiKeyHint: string | null;

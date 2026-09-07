@@ -1,13 +1,13 @@
 type ShareIconProps = {
-  /** Nombre de personnes qui se partagent la ligne. */
+  /** Number of people sharing the line. */
   count: number;
-  /** Vrai quand la ligne suit la répartition par défaut, faute d'attribution. */
+  /** True when the line follows the default split, for lack of an assignment. */
   auto?: boolean;
-  /** L'icône double un texte voisin : inutile de la répéter aux lecteurs d'écran. */
+  /** The icon duplicates nearby text: no need to repeat it to screen readers. */
   decorative?: boolean;
 };
 
-/** Distingue d'un coup d'œil ce qu'une personne assume seule de ce qu'elle partage. */
+/** Tells apart at a glance what a person takes on alone from what they share. */
 export function ShareIcon({ count, auto = false, decorative = false }: ShareIconProps) {
   const shared = count > 1;
   const label = shared

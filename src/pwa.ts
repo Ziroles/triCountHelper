@@ -1,3 +1,7 @@
+import { logger } from './lib/log';
+
+const log = logger('pwa');
+
 export type UpdateState = {
   needRefresh: boolean;
   offlineReady: boolean;
@@ -21,19 +25,33 @@ export function subscribeUpdates(listener: Listener): () => void {
 }
 
 export function refreshApp(): void {
+  log.info('reload requested to apply the update');
   void applyUpdate?.(true);
 }
 
 export async function registerServiceWorker(): Promise<void> {
-  if (!('serviceWorker' in navigator)) return;
+  if (!('serviceWorker' in navigator)) {
+    log.info('no service worker on this browser');
+    return;
+  }
   try {
     const { registerSW } = await import('virtual:pwa-register');
     applyUpdate = registerSW({
       immediate: true,
-      onNeedRefresh: () => emit({ needRefresh: true }),
-      onOfflineReady: () => emit({ offlineReady: true }),
+      onNeedRefresh: () => {
+        log.info('new version waiting for a reload');
+        emit({ needRefresh: true });
+      },
+      onOfflineReady: () => {
+        log.info('application available offline');
+        emit({ offlineReady: true });
+      },
     });
-  } catch {
+    log.debug('service worker registered');
+  } catch (error) {
+    /* A service worker that fails to register leaves a working application —
+       but no longer offline, and with nothing to say so. */
+    log.warn('service worker registration failed', error);
   }
 }
 
@@ -67,6 +85,7 @@ export async function promptInstall(): Promise<boolean> {
   if (!deferredPrompt) return false;
   await deferredPrompt.prompt();
   const { outcome } = await deferredPrompt.userChoice;
+  log.info('install prompt', { outcome });
   deferredPrompt = null;
   for (const listener of installListeners) listener(false);
   return outcome === 'accepted';

@@ -27,9 +27,9 @@ function sameAssignment(line: ReceiptLine, ids: readonly string[]): boolean {
 }
 
 export function AssignScreen({ receipt, onBack, onDone }: AssignScreenProps) {
-  /* Les participants sont les membres du tricount : il n'y a plus personne à
-     ajouter ici. Quelqu'un qui manque s'ajoute dans Tricount, puis se récupère
-     par « Rafraîchir » sur l'écran du groupe — c'est là que la liste fait foi. */
+  /* The participants are the tricount's members: there is nobody left to add
+     here. Someone missing gets added in Tricount, then picked up via "Refresh"
+     on the group screen — that is where the list is authoritative. */
   const people = useGroupPeople();
   const updateReceipt = useAppStore((s) => s.updateReceipt);
 
@@ -44,8 +44,8 @@ export function AssignScreen({ receipt, onBack, onDone }: AssignScreenProps) {
     [receipt.lines],
   );
 
-  /* Les membres arrivent du réseau : on présélectionne le premier dès qu'ils
-     sont là, pour que l'écran soit utilisable sans un geste préalable. */
+  /* The members arrive from the network: we preselect the first one as soon as
+     they are there, so the screen is usable without a preliminary gesture. */
   const primed = useRef(false);
   useEffect(() => {
     if (primed.current || people.length === 0) return;

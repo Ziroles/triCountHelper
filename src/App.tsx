@@ -33,8 +33,8 @@ function StatusStrip() {
   useEffect(() => subscribeInstall(setInstallable), []);
   useEffect(() => subscribeUpdates((state) => setNeedRefresh(state.needRefresh)), []);
 
-  /* Une divergence de contrat passe avant tout le reste : elle explique des
-     échecs qui paraîtraient autrement inexplicables. */
+  /* A contract mismatch comes before everything else: it explains failures that
+     would otherwise look inexplicable. */
   if (contractMismatch) {
     return (
       <div className="strip">

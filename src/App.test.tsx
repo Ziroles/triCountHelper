@@ -11,12 +11,11 @@ import { DEFAULT_SERVER_SETTINGS, DEFAULT_SETTINGS } from './types';
 import { clearCache, forgetEverything } from './db';
 
 /**
- * Parcours complet, du groupe au récapitulatif copiable.
+ * Full journey, from the group to the copyable summary.
  *
- * Ces scénarios sont ceux de la version locale, transposés : les participants
- * ne sont plus saisis à la main mais viennent du tricount. Les montants
- * attendus, eux, n'ont pas bougé d'un centime — c'est précisément ce qu'ils
- * vérifient.
+ * These scenarios are the local version's, transposed: the participants are no
+ * longer typed in by hand but come from the tricount. The expected amounts, for
+ * their part, have not moved by a cent — which is precisely what they check.
  */
 describe('parcours complet, sans photo', () => {
   beforeEach(async () => {
@@ -94,12 +93,12 @@ describe('parcours complet, sans photo', () => {
     await user.click(screen.getByRole('button', { name: 'Attribuer' }));
     await screen.findByRole('heading', { name: 'Attribution' });
 
-    // Les participants sont déjà là : ils viennent du tricount, et le premier
-    // est présélectionné pour que l'écran soit utilisable sans geste préalable.
+    // The participants are already there: they come from the tricount, and the
+    // first is preselected so the screen is usable without a prior gesture.
     await screen.findByRole('button', { name: 'Léa' });
-    await user.click(screen.getByText('Tartare')); // → Mathieu, présélectionné
-    await user.click(screen.getByRole('button', { name: 'Mathieu' })); // on le retire
-    await user.click(screen.getByRole('button', { name: 'Léa' })); // on prend Léa
+    await user.click(screen.getByText('Tartare')); // → Mathieu, preselected
+    await user.click(screen.getByRole('button', { name: 'Mathieu' })); // remove them
+    await user.click(screen.getByRole('button', { name: 'Léa' })); // pick Léa
     await user.click(screen.getByText('Pâtes')); // → Léa
 
     await waitFor(() => expect(screen.queryByText(/non attribuée/)).not.toBeInTheDocument());
@@ -154,7 +153,7 @@ describe('parcours complet, sans photo', () => {
     await screen.findByRole('heading', { name: 'Attribution' });
 
     await screen.findByRole('button', { name: 'Léa' });
-    await user.click(screen.getByText('Bière')); // → Mathieu, présélectionné
+    await user.click(screen.getByText('Bière')); // → Mathieu, preselected
     await user.click(screen.getByRole('button', { name: 'Mathieu' }));
     await user.click(screen.getByRole('button', { name: 'Léa' }));
     await user.click(screen.getByText('Pain')); // → Léa
@@ -206,8 +205,8 @@ describe('parcours complet, sans photo', () => {
     });
 
     unmount();
-    // Un autre appareil : ni cache local, ni état en mémoire, ni adresse
-    // héritée. Tout ce qui s'affichera devra donc venir du serveur.
+    // Another device: no local cache, no in-memory state, no inherited
+    // address. So everything shown will have to come from the server.
     await clearCache();
     resetForTests();
     window.history.replaceState(null, '', '/');
@@ -229,11 +228,11 @@ describe('parcours complet, sans photo', () => {
 });
 
 /**
- * Historique du navigateur.
+ * Browser history.
  *
- * En PWA installée, le geste retour du système est la seule façon de reculer.
- * Sans entrée d'historique, il quitte l'application — et le parcours compte
- * désormais trois niveaux.
+ * In an installed PWA, the system's back gesture is the only way to step back.
+ * Without a history entry, it leaves the application — and the journey now has
+ * three levels.
  */
 describe('geste retour et adresses', () => {
   beforeEach(async () => {

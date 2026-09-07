@@ -1,27 +1,28 @@
 /**
- * IndexedDB : cache de lecture et préférences d'appareil.
+ * IndexedDB: read cache and device preferences.
  *
- * Ce module a changé de rôle. Il ne détient plus la vérité — c'est l'API qui la
- * détient, depuis que les tickets sont partagés entre les membres d'un groupe.
- * Il garde ici :
+ * This module has changed role. It no longer holds the truth — the API does,
+ * ever since receipts became shared between the members of a group. What it
+ * keeps here is:
  *
- *  - le **jeton d'appareil**, seule donnée réellement indispensable ;
- *  - un **cache** des groupes, tickets et photos déjà consultés, pour que
- *    l'application reste lisible hors ligne ;
- *  - les **préférences d'affichage** (thème, régime fiscal, pourboire par
- *    défaut), qui n'intéressent personne d'autre que cet appareil.
+ *  - the **device token**, the only genuinely indispensable piece of data;
+ *  - a **cache** of the groups, receipts and photos already viewed, so the app
+ *    stays readable offline;
+ *  - the **display preferences** (theme, tax regime, default tip), which are of
+ *    no interest to anyone but this device.
  *
- * Rien de ce qui est écrit ici n'est renvoyé au serveur : le cache est jetable,
- * et une lecture qui échoue vaut mieux qu'une écriture inventée.
+ * Nothing written here is sent back to the server: the cache is disposable, and
+ * a failed read is better than an invented write.
  *
- * La nouvelle base porte un **nom distinct** de l'ancienne. Migrer en place
- * aurait obligé à supprimer les anciens magasins pour recréer les nouveaux sous
- * les mêmes noms — et donc à détruire précisément ce que l'assistant d'import
- * doit encore pouvoir lire. Deux bases coexistent le temps de l'import ;
- * l'ancienne est supprimée une fois qu'il a abouti.
+ * The new database has a **distinct name** from the old one. Migrating in place
+ * would have meant deleting the old stores to recreate the new ones under the
+ * same names — and therefore destroying exactly what the import wizard must
+ * still be able to read. Two databases coexist for the duration of the import;
+ * the old one is deleted once it has succeeded.
  */
 
 import { deleteDB, openDB, type DBSchema, type IDBPDatabase } from 'idb';
+import { logger } from '../lib/log';
 import {
   DEFAULT_SETTINGS,
   type Group,
@@ -31,6 +32,8 @@ import {
   type Settings,
 } from '../types';
 
+const log = logger('db');
+
 const DB_NAME = 'splitticket-app';
 const DB_VERSION = 1;
 
@@ -39,7 +42,7 @@ const LEGACY_DB_NAME = 'splitticket';
 type CacheStore = 'groups' | 'receipts' | 'receiptLists' | 'images';
 
 interface SplitTicketDB extends DBSchema {
-  /** Identité de l'appareil et préférences locales. Clefs en ligne. */
+  /** Device identity and local preferences. In-line keys. */
   device: { key: string; value: { key: string; value: unknown } };
   groups: { key: string; value: Group };
   receipts: { key: string; value: Receipt };
@@ -54,8 +57,8 @@ export function getDb(): Promise<IDBPDatabase<SplitTicketDB>> {
     dbPromise = openDB<SplitTicketDB>(DB_NAME, DB_VERSION, {
       upgrade(db) {
         db.createObjectStore('device', { keyPath: 'key' });
-        // Clefs hors ligne : la valeur stockée est la donnée nue, sans champ
-        // technique ajouté pour la retrouver.
+        // Out-of-line keys: the stored value is the bare data, with no
+        // technical field added just to find it again.
         db.createObjectStore('groups');
         db.createObjectStore('receipts');
         db.createObjectStore('receiptLists');
@@ -66,16 +69,21 @@ export function getDb(): Promise<IDBPDatabase<SplitTicketDB>> {
   return dbPromise;
 }
 
-/** Le cache ne doit jamais faire échouer un écran : une panne locale rend `undefined`. */
+/** The cache must never fail a screen: a local failure yields `undefined`. */
 async function safely<T>(action: () => Promise<T>, fallback: T): Promise<T> {
   try {
     return await action();
-  } catch {
+  } catch (error) {
+    /* Swallowing the error is the right behaviour for the screen — it is what
+       makes the app usable in private browsing or with a full quota. But
+       swallowed *and* silent, a broken database looks like an empty cache, and
+       you go hunting for the bug elsewhere for an hour. */
+    log.warn('local cache access refused', error);
     return fallback;
   }
 }
 
-// ── Identité et préférences ──────────────────────────────────────────────────
+// ── Identity and preferences ─────────────────────────────────────────────────
 
 async function readDevice<T>(key: string, fallback: T): Promise<T> {
   return safely(async () => {
@@ -150,7 +158,7 @@ export const cacheImage = (receiptId: string, blob: Blob): Promise<void> =>
 export const cachedImage = (receiptId: string): Promise<Blob | undefined> =>
   read<Blob>('images', receiptId);
 
-// ── Entretien ────────────────────────────────────────────────────────────────
+// ── Maintenance ──────────────────────────────────────────────────────────────
 
 export async function clearCache(): Promise<void> {
   const db = await getDb();
@@ -163,7 +171,7 @@ export async function clearCache(): Promise<void> {
   await writeDevice('groupList', []);
 }
 
-/** Efface tout, jeton compris : l'appareil redeviendra inconnu du serveur. */
+/** Erases everything, token included: the device becomes unknown to the server again. */
 export async function forgetEverything(): Promise<void> {
   await clearCache();
   await (await getDb()).clear('device');
@@ -175,7 +183,7 @@ export async function estimateStorage(): Promise<{ usage: number; quota: number 
   return { usage, quota };
 }
 
-// ── Relecture de l'ancien schéma (assistant d'import) ────────────────────────
+// ── Reading back the old schema (import wizard) ──────────────────────────────
 
 export type LegacyPerson = { id: string; name: string };
 
@@ -185,11 +193,12 @@ export type LegacySnapshot = {
 };
 
 /**
- * Lit la base du schéma v1, sans la modifier.
+ * Reads the v1-schema database, without modifying it.
  *
- * Ouvrir sans numéro de version évite de déclencher une migration : on regarde
- * ce qui est là, et on repart. Absence de base, absence de magasin ou base vide
- * se valent — il n'y a rien à importer, et ce n'est pas une erreur.
+ * Opening without a version number avoids triggering a migration: we look at
+ * what is there, and leave. A missing database, a missing store or an empty
+ * database are all the same — there is nothing to import, and that is not an
+ * error.
  */
 export async function readLegacyData(): Promise<LegacySnapshot | null> {
   return safely(async () => {
@@ -208,7 +217,7 @@ export async function readLegacyData(): Promise<LegacySnapshot | null> {
   }, null);
 }
 
-/** Supprime l'ancienne base. Appelé une fois l'import terminé, ou refusé. */
+/** Deletes the old database. Called once the import is done, or declined. */
 export async function discardLegacyData(): Promise<void> {
   await safely(async () => {
     await deleteDB(LEGACY_DB_NAME);

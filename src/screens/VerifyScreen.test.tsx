@@ -11,12 +11,11 @@ import { DEFAULT_SERVER_SETTINGS, DEFAULT_SETTINGS } from '../types';
 import { forgetEverything } from '../db';
 
 /**
- * Les centimes d'une ligne, à travers l'interface.
+ * A line's cents, through the interface.
  *
- * Ces cas décrivent un piège concret : 3 bières à 10,00 $ s'affichent 3 × 3,33,
- * et repartir de ce prix unitaire arrondi ferait tomber la ligne à 9,99 $. Ce
- * qui est vérifié ici, c'est qu'aucun aller-retour dans un champ ne fait perdre
- * un centime.
+ * These cases describe a concrete trap: 3 beers at $10.00 show as 3 × 3.33, and
+ * starting again from that rounded unit price would drop the line to $9.99.
+ * What is checked here is that no round trip through a field loses a cent.
  */
 describe('centimes d’une ligne', () => {
   beforeEach(async () => {
@@ -101,7 +100,7 @@ describe('centimes d’une ligne', () => {
     await user.type(quantity, '6');
     await user.tab();
 
-    // 6 × 3,33 donnerait 19,98 $ : c'est le total réel qu'on double.
+    // 6 × 3.33 would give $19.98: it is the real total that gets doubled.
     expect(line()?.totalCents).toBe(2000);
   });
 

@@ -13,12 +13,12 @@ import { ResultsScreen } from './ResultsScreen';
 type ReceiptFlowProps = { groupId: string; receiptId: string; step: ReceiptStep };
 
 /**
- * Le parcours d'un ticket, et l'arbitrage des conflits d'édition.
+ * A receipt's journey, and the arbitration of editing conflicts.
  *
- * Un ticket appartient au groupe : deux personnes peuvent l'ouvrir en même
- * temps. Quand le serveur refuse une écriture partie d'une version périmée, on
- * ne bricole pas une fusion — on le dit, et on laisse choisir. Fusionner des
- * montants automatiquement reviendrait à inventer de l'argent.
+ * A receipt belongs to the group: two people can open it at the same time. When
+ * the server refuses a write started from a stale version, we do not rig up a
+ * merge — we say so, and let the user choose. Merging amounts automatically
+ * would amount to inventing money.
  */
 function ConflictSheet() {
   const conflict = useAppStore((s) => s.conflict);
@@ -86,8 +86,8 @@ export function ReceiptFlow({ groupId, receiptId, step }: ReceiptFlowProps) {
     void openReceipt(receiptId);
   }, [receiptId, openReceipt]);
 
-  // L'étape courante est mémorisée sur le ticket : le rouvrir plus tard, ou
-  // depuis un autre appareil, reprend là où on l'avait laissé.
+  // The current step is remembered on the receipt: reopening it later, or from
+  // another device, picks up where it was left.
   useEffect(() => {
     if (receipt && receipt.id === receiptId && receipt.step !== step) {
       updateReceipt({ step });

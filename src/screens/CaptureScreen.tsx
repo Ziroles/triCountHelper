@@ -12,26 +12,29 @@ import {
 } from '../capture/image';
 import * as api from '../api';
 import { cacheImage, cachedImage } from '../db';
+import { logger } from '../lib/log';
 import { useAppStore } from '../store/useAppStore';
 import type { Receipt } from '../types';
+
+const log = logger('photo');
 
 type CaptureScreenProps = {
   receipt: Receipt;
   onBack: () => void;
   onDone: () => void;
-  /** Repartir vers la vérification sans relancer la lecture, quand elle a déjà eu lieu. */
+  /** Go back to verification without re-running the reading, when it already happened. */
   onSkip?: (() => void) | undefined;
-  /** Sauter la photo et saisir le ticket à la main. */
+  /** Skip the photo and enter the receipt by hand. */
   onManual: () => void;
 };
 
 /**
- * Photo du ticket : cadrage, rotation, envoi.
+ * Receipt photo: framing, rotation, upload.
  *
- * Le recadrage et la réduction restent **côté client**, avant l'envoi. C'est le
- * seul moyen de n'envoyer qu'un ticket net et léger sur un réseau mobile : une
- * photo de 8 Mpx franchit rarement bien un tunnel de métro, et la partie utile
- * en fait souvent moins d'un tiers.
+ * Cropping and downscaling stay **client-side**, before the upload. It is the
+ * only way to send nothing but a sharp, light receipt over a mobile network: an
+ * 8 Mpx photo rarely gets through a metro tunnel well, and the useful part is
+ * often less than a third of it.
  */
 export function CaptureScreen({ receipt, onBack, onDone, onSkip, onManual }: CaptureScreenProps) {
   const updateReceipt = useAppStore((s) => s.updateReceipt);
@@ -47,15 +50,15 @@ export function CaptureScreen({ receipt, onBack, onDone, onSkip, onManual }: Cap
   const fileInput = useRef<HTMLInputElement>(null);
   const userPicked = useRef(false);
 
-  /* Le ticket garde sa photo : en revenant sur cet écran, on la remet sous les
-     yeux plutôt que de présenter une zone de dépôt vide. */
+  /* The receipt keeps its photo: coming back to this screen puts it back in
+     front of the user rather than showing an empty drop zone. */
   const imageId = receipt.imageId;
   useEffect(() => {
     if (!imageId) return undefined;
     let cancelled = false;
     void (async () => {
       const blob = (await cachedImage(receipt.id)) ?? (await api.readImage(receipt.id).catch(() => null));
-      // Une photo choisie entre-temps prime sur celle qui dormait en cache.
+      // A photo picked in the meantime wins over the one sleeping in the cache.
       if (cancelled || !blob || userPicked.current) return;
       void cacheImage(receipt.id, blob);
       setOriginal(blob);
@@ -92,6 +95,11 @@ export function CaptureScreen({ receipt, onBack, onDone, onSkip, onManual }: Cap
       setError("Ce fichier n'est pas une image.");
       return;
     }
+    log.info('photo picked', {
+      name: file.name,
+      type: file.type,
+      size: `${Math.round(file.size / 1024)} KiB`,
+    });
     setError(null);
     userPicked.current = true;
     setRestored(false);
@@ -104,17 +112,31 @@ export function CaptureScreen({ receipt, onBack, onDone, onSkip, onManual }: Cap
     if (!original) return;
     setBusy(true);
     setError(null);
+    /* Every step divides the weight; this is the path we suspect first when an
+       upload drags or a server answers 413. The sizes make that suspicion
+       checkable instead of leaving it a hypothesis. */
+    const done = log.time(`preparing and uploading receipt ${receipt.id}`);
+    const kib = (blob: Blob) => Math.round(blob.size / 1024);
     try {
       const rotated = await rotateImage(original, rotation);
-      const { blob } = await normalizeCapture(rotated, { crop });
-      // On réduit une dernière fois juste avant l'envoi : c'est ce que le modèle
-      // recevra, autant que ce soit ce qui passe sur le réseau.
+      const { blob, width, height } = await normalizeCapture(rotated, { crop });
+      // One last downscale right before the upload: this is what the model will
+      // receive, so it may as well be what goes over the network.
       const upload = await downscaleForUpload(blob);
+      log.debug('image prepared', {
+        rotation,
+        crop,
+        original: `${kib(original)} KiB`,
+        cropped: `${width}×${height}, ${kib(blob)} KiB`,
+        uploaded: `${kib(upload)} KiB`,
+      });
       const saved = await api.uploadImage(receipt.id, upload);
       void cacheImage(receipt.id, upload);
+      done(`photo accepted, version ${saved.version}`);
       updateReceipt({ ...saved, step: 'processing' });
       onDone();
     } catch (cause) {
+      log.error('photo upload failed', cause);
       setError(
         cause instanceof Error
           ? cause.message

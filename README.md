@@ -56,7 +56,7 @@ groupe — tous ses membres voient les mêmes montants, depuis n'importe quel ap
 
 | Commande | Effet |
 |---|---|
-| `npm run dev` | Serveur de développement, rechargement à chaud, `/api` mandaté |
+| `npm run dev` | Serveur de développement, rechargement à chaud, `/api` mandaté, logs du navigateur dans ce terminal |
 | `npm run build` | Build de production dans `dist/` |
 | `npm run preview` | Sert `dist/` avec le service worker actif |
 | `npm test` | Suite de tests (Vitest) |
@@ -67,6 +67,48 @@ poussée et chaque demande de tirage.
 
 Le `dist/` produit fait environ 255 Kio : des fichiers statiques. N'importe quel hébergeur
 convient, à condition de mandater `/api` vers l'API — voir `docker/nginx.conf`.
+
+---
+
+## Journal
+
+**Les logs de l'application s'affichent dans le terminal, pas dans le navigateur.**
+
+En développement, chaque ligne remonte par le canal du HMR et s'écrit dans la console qui
+fait tourner `npm run dev`. C'est délibéré : l'application se teste au téléphone, ticket de
+caisse en main, et sur un téléphone il n'y a pas de console à ouvrir. Un seul journal, celui
+qu'on est déjà en train de lire.
+
+```
+22:20:34.329 info  boot         démarrage
+                                { mode: 'development', enLigne: true }
+22:20:34.329 debug api          GET /v1/groups → 200 en 34 ms
+22:20:34.329 warn  store        conflit de version : le ticket a bougé ailleurs
+                                { ticket: 'r-42', versionLocale: 7 }
+  → api  POST /v1/receipts/r-42/scan
+  ← api  POST /v1/receipts/r-42/scan → 200
+```
+
+Les lignes `→ api` / `← api` viennent du proxy Vite, pas de la page : c'est le seul point de
+vue qui distingue « l'API a répondu une erreur » de « l'API n'est pas lancée ».
+
+Sont instrumentées les frontières — réseau, cache IndexedDB, service worker, envoi vers le
+tricount — avec leur durée dès qu'il y a une attente. Le calcul de répartition ne l'est pas :
+il a des tests. S'y ajoutent les appels `console.*` de la page (avertissements de React
+compris) et les erreurs non rattrapées, qui arrivent ainsi au même endroit que le reste.
+
+| Variable | Effet |
+|---|---|
+| `VITE_LOG_LEVEL` | Seuil : `debug`, `info`, `warn`, `error`, `silent`. Défaut : `debug` en dev, `warn` en production |
+| `VITE_LOG_ECHO` | `1` pour écrire *aussi* dans la console du navigateur. Défaut : non |
+| `VITE_LOG_CONSOLE` | `0` pour cesser de renvoyer les `console.*` de la page. Défaut : renvoyés |
+
+En production, il n'y a pas de serveur à qui parler : seuls les avertissements et les erreurs
+vont à la console du navigateur. **Jetons, clés et mots de passe sont masqués avant l'envoi** —
+un terminal se relit à plusieurs et se colle dans des rapports.
+
+Le canal tient en deux fichiers : `tools/vite-plugin-dev-log.ts` côté serveur,
+`src/lib/log.ts` côté page.
 
 ---
 
@@ -248,7 +290,7 @@ pour tous les montants.
 ```
 src/
   api/          Client HTTP, et la traduction domaine ↔ API
-  lib/          Calcul financier, répartition, taxes, pourboire, export
+  lib/          Calcul financier, répartition, taxes, pourboire, export, journal
   capture/      Recadrage, rotation, compression de l'image
   db/           Cache IndexedDB, jeton d'appareil, préférences locales
   store/        État Zustand, écriture différée, arbitrage des conflits
@@ -256,6 +298,7 @@ src/
   screens/      Groupes, groupe, et les cinq étapes d'un ticket
   integrations/ Envoi vers Tricount
   styles/       Jetons et feuille unique
+tools/          Plugin Vite : les logs du navigateur vers le terminal
 docker/         Configuration nginx de production
 ```
 

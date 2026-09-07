@@ -1,28 +1,29 @@
 /**
- * État de l'application.
+ * Application state.
  *
- * Le store n'est plus le propriétaire des données : il est le client de l'API,
- * doublé d'un cache. Trois règles le gouvernent.
+ * The store no longer owns the data: it is the API client, doubled as a cache.
+ * Three rules govern it.
  *
- * **Lire depuis le cache, puis rafraîchir.** Un écran affiche immédiatement ce
- * qu'il a déjà vu, et se met à jour quand le réseau répond. Hors ligne, il reste
- * simplement sur la dernière version connue.
+ * **Read from the cache, then refresh.** A screen immediately shows what it has
+ * already seen, and updates when the network answers. Offline, it simply stays
+ * on the last known version.
  *
- * **N'écrire qu'en ligne.** Il n'y a pas de file de rejeu : une modification
- * exige le réseau, et l'interface le dit. Rejouer des écritures sur un ticket
- * que quelqu'un d'autre a modifié entre-temps demanderait de fusionner des
- * montants — c'est-à-dire d'inventer de l'argent.
+ * **Only write while online.** There is no replay queue: a change requires the
+ * network, and the interface says so. Replaying writes onto a receipt someone
+ * else has changed in the meantime would mean merging amounts — that is,
+ * inventing money.
  *
- * **Une écriture à la fois par ticket.** Les modifications s'accumulent, une
- * seule requête part, et la suivante repart de la version que le serveur vient
- * de rendre. C'est ce qui rend le verrou optimiste utilisable sans que chaque
- * frappe au clavier devienne un conflit.
+ * **One write at a time per receipt.** Changes pile up, a single request goes
+ * out, and the next one starts from the version the server just returned. That
+ * is what makes the optimistic lock usable without every keystroke turning into
+ * a conflict.
  */
 
 import { create } from 'zustand';
 import * as api from '../api';
 import { ApiError, OfflineError } from '../api';
 import * as db from '../db';
+import { logger } from '../lib/log';
 import { colorForIndex } from '../lib/people';
 import { currentRoute, routeToPath } from '../lib/routing';
 import {
@@ -64,22 +65,22 @@ type State = {
   loadingGroups: boolean;
   loadingReceipts: boolean;
   loadingReceipt: boolean;
-  /** Erreur de chargement affichable, distincte des erreurs d'écriture. */
+  /** Displayable load error, distinct from write errors. */
   loadError: string | null;
 
   saveState: SaveState;
   saveError: string | null;
-  /** Version serveur d'un ticket modifié ailleurs, en attente d'arbitrage. */
+  /** Server version of a receipt changed elsewhere, awaiting arbitration. */
   conflict: Receipt | null;
 
-  /** Vrai quand le serveur annonce un contrat différent de celui de ce paquet. */
+  /** True when the server announces a contract different from this bundle's. */
   contractMismatch: boolean;
 };
 
 type Actions = {
   init: () => Promise<void>;
   navigate: (route: Route) => void;
-  /** Route imposée par l'historique : on la suit sans l'y réempiler. */
+  /** Route imposed by history: follow it without pushing it back on. */
   adoptRoute: (route: Route) => void;
 
   refreshGroups: () => Promise<void>;
@@ -107,12 +108,12 @@ type Actions = {
 export type AppStore = State & Actions;
 
 /**
- * Rejoue le démarrage. Réservé aux tests, qui remontent l'application plusieurs
- * fois dans un même processus et ont besoin que `init` reparte de zéro.
+ * Replays start-up. Reserved for tests, which mount the application several
+ * times in a single process and need `init` to start over from scratch.
  */
 export let resetForTests: () => void = () => undefined;
 
-/** Participants d'un groupe, dans la forme attendue par `lib/compute.ts`. */
+/** A group's participants, in the shape `lib/compute.ts` expects. */
 export function peopleOf(group: Group | null): Person[] {
   if (!group) return [];
   return group.members.map((member, index) => ({
@@ -122,20 +123,21 @@ export function peopleOf(group: Group | null): Person[] {
   }));
 }
 
+const log = logger('store');
+
 function messageOf(error: unknown): string {
   if (error instanceof ApiError) return error.message;
   return 'Une erreur inattendue est survenue.';
 }
 
 export const useAppStore = create<AppStore>((set, get) => {
-  // ── Écriture différée ──────────────────────────────────────────────────────
-  // Une seule requête en vol par ticket ; les frappes suivantes attendent leur
-  // tour plutôt que de partir en parallèle et de se déclarer mutuellement
-  // périmées.
+  // ── Deferred writing ───────────────────────────────────────────────────────
+  // A single request in flight per receipt; later keystrokes wait their turn
+  // rather than going out in parallel and declaring each other stale.
   let flushTimer: ReturnType<typeof setTimeout> | null = null;
   let inFlight: Promise<void> | null = null;
   let dirty = false;
-  /** Démarrage en cours ou déjà fait — voir `init`. */
+  /** Start-up in progress or already done — see `init`. */
   let starting: Promise<void> | null = null;
   resetForTests = () => {
     starting = null;
@@ -153,19 +155,25 @@ export const useAppStore = create<AppStore>((set, get) => {
 
   async function push(): Promise<void> {
     const current = get().receipt;
-    if (!current || get().conflict) return;
+    if (!current || get().conflict) {
+      if (current) log.debug('write suspended: conflict awaiting arbitration');
+      return;
+    }
 
     if (inFlight) {
+      log.debug('write already in flight, queued', { receipt: current.id });
       dirty = true;
       return inFlight;
     }
 
     set({ saveState: 'saving', saveError: null });
+    const done = log.time(`writing receipt ${current.id}`);
     inFlight = (async () => {
       try {
         const saved = await api.writeReceipt(current);
-        // On n'adopte que la version : le document local a pu avancer pendant
-        // le vol, et l'écraser ferait perdre les frappes de l'utilisateur.
+        done(`version ${current.version} → ${saved.version}`);
+        // We only adopt the version: the local document may have moved on
+        // during the flight, and overwriting it would lose the user's typing.
         set((state) =>
           state.receipt && state.receipt.id === saved.id
             ? {
@@ -178,11 +186,16 @@ export const useAppStore = create<AppStore>((set, get) => {
         if (after && after.id === saved.id) void db.cacheReceipt(after);
       } catch (error) {
         if (error instanceof OfflineError) {
+          log.warn('write postponed: offline', { receipt: current.id });
           set({ saveState: 'offline', saveError: error.message });
           return;
         }
         if (error instanceof ApiError && error.code === 'version_conflict') {
           const payload = error.payload as { current?: unknown } | undefined;
+          log.warn('version conflict: the receipt moved elsewhere', {
+            receipt: current.id,
+            localVersion: current.version,
+          });
           set({
             saveState: 'conflict',
             saveError: 'Ce ticket a été modifié sur un autre appareil.',
@@ -190,12 +203,14 @@ export const useAppStore = create<AppStore>((set, get) => {
           });
           return;
         }
+        log.error('write failed', error);
         set({ saveState: 'error', saveError: messageOf(error) });
       }
     })().finally(() => {
       inFlight = null;
       if (dirty) {
         dirty = false;
+        log.debug('changes accumulated during the flight: writing again');
         void push();
       }
     });
@@ -211,7 +226,7 @@ export const useAppStore = create<AppStore>((set, get) => {
   }
 
   if (typeof document !== 'undefined') {
-    // Quitter l'écran ne doit pas perdre la dernière frappe.
+    // Leaving the screen must not lose the last keystroke.
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'hidden') {
         cancelTimer();
@@ -249,37 +264,44 @@ export const useAppStore = create<AppStore>((set, get) => {
     contractMismatch: false,
 
     /**
-     * Démarrage, **idempotent**.
+     * Start-up, **idempotent**.
      *
-     * React invoque les effets deux fois en développement (StrictMode), et un
-     * second démarrage naïf réécraserait la liste fraîchement chargée par un
-     * cache encore vide : la liste disparaîtrait puis reviendrait, et tout ce
-     * qui était en cours de clic serait démonté au passage. La promesse est donc
-     * mémorisée, et le cache ne s'applique qu'à un écran encore vide.
+     * React runs effects twice in development (StrictMode), and a naive second
+     * start-up would overwrite the freshly loaded list with a still-empty
+     * cache: the list would disappear then come back, and whatever was mid-click
+     * would be unmounted along the way. So the promise is memoised, and the
+     * cache only applies to a still-empty screen.
      */
     init() {
       if (starting !== null) return starting;
+      const booted = log.time('start-up');
       starting = (async () => {
         const [settings, groups] = await Promise.all([db.getSettings(), db.cachedGroups()]);
+        log.info('local cache read', { groups: groups.length });
         set((state) => ({
           settings,
-          // Le réseau a pu répondre pendant qu'on lisait le cache : il est plus
-          // récent par construction, on ne le recouvre pas.
+          // The network may have answered while we were reading the cache: it
+          // is more recent by construction, so we do not cover it up.
           groups: state.groups.length > 0 ? state.groups : groups,
           ready: true,
         }));
 
         const setOnline = () => {
           const online = navigator.onLine;
+          log.info(online ? 'back online' : 'gone offline');
           set({ online });
-          if (online && get().saveState === 'offline') void push();
+          if (online && get().saveState === 'offline') {
+            log.info('resuming the postponed write');
+            void push();
+          }
         };
         window.addEventListener('online', setOnline);
         window.addEventListener('offline', setOnline);
 
-        /* L'adresse fait foi au chargement : un signet, un lien partagé ou un
-           rechargement ouvrent l'écran attendu, pas l'accueil. */
+        /* The address is authoritative on load: a bookmark, a shared link or a
+           reload open the expected screen, not the home page. */
         const opening = currentRoute();
+        log.info('opening route', opening);
         window.history.replaceState({ route: opening }, '', routeToPath(opening));
         set({ route: opening });
 
@@ -288,21 +310,34 @@ export const useAppStore = create<AppStore>((set, get) => {
           get().adoptRoute(state?.route ?? currentRoute());
         });
 
-        /* Compatibilité : l'API et l'application se déploient séparément, et
-           une divergence ne se remarquerait sinon qu'au premier appel qui
-           répond autre chose que prévu. Un échec de /health n'est pas une
-           divergence — c'est peut-être simplement le réseau. */
+        /* Compatibility: the API and the app deploy separately, and a mismatch
+           would otherwise only show up on the first call that answers something
+           other than expected. A /health failure is not a mismatch — it may
+           simply be the network. */
         void api
           .health()
-          .then((info) => set({ contractMismatch: info.contractVersion !== api.CONTRACT_VERSION }))
-          .catch(() => undefined);
+          .then((info) => {
+            const mismatch = info.contractVersion !== api.CONTRACT_VERSION;
+            if (mismatch) {
+              log.error('contract mismatch between the app and the API', {
+                app: api.CONTRACT_VERSION,
+                server: info.contractVersion,
+              });
+            } else {
+              log.info('server online', info);
+            }
+            set({ contractMismatch: mismatch });
+          })
+          .catch((error) => log.warn('/health unreachable — the network, probably', error));
 
         await Promise.all([get().refreshGroups(), get().refreshMe()]);
+        booted('application ready');
       })();
       return starting;
     },
 
     navigate(route) {
+      log.info('navigation', route);
       cancelTimer();
       void push();
       set({ route, loadError: null });
@@ -312,24 +347,30 @@ export const useAppStore = create<AppStore>((set, get) => {
     },
 
     adoptRoute(route) {
-      // Le geste retour a déjà déplacé l'historique : republier l'entrée
-      // enfermerait l'utilisateur dans l'application, incapable d'en sortir.
+      // The back gesture has already moved history: republishing the entry
+      // would trap the user inside the app, unable to get out.
+      log.info('back in history', route);
       cancelTimer();
       void push();
       set({ route, loadError: null });
     },
 
-    // ── Groupes ──────────────────────────────────────────────────────────────
+    // ── Groups ───────────────────────────────────────────────────────────────
 
     async refreshGroups() {
       set({ loadingGroups: true });
       try {
         const groups = await api.listGroups();
+        log.debug('group list refreshed', { groups: groups.length });
         set({ groups, loadError: null });
         void db.cacheGroups(groups);
       } catch (error) {
-        // Hors ligne, la liste en cache reste la bonne réponse à afficher.
-        if (!(error instanceof OfflineError)) set({ loadError: messageOf(error) });
+        // Offline, the cached list is still the right answer to show.
+        if (error instanceof OfflineError) log.debug('groups: offline, keeping the cache');
+        else {
+          log.error('groups: refresh failed', error);
+          set({ loadError: messageOf(error) });
+        }
       } finally {
         set({ loadingGroups: false });
       }
@@ -340,6 +381,7 @@ export const useAppStore = create<AppStore>((set, get) => {
         db.cachedGroup(groupId),
         db.cachedReceiptList(groupId),
       ]);
+      log.info('opening group', { group: groupId, fromCache: cachedGroup !== null });
       set({
         group: cachedGroup ?? null,
         receipts: cachedList,
@@ -352,18 +394,29 @@ export const useAppStore = create<AppStore>((set, get) => {
           api.readGroup(groupId),
           api.listReceipts(groupId),
         ]);
+        log.debug('group loaded', {
+          group: groupId,
+          members: group.members.length,
+          receipts: receipts.length,
+        });
         set({ group, receipts });
         void db.cacheGroup(group);
         void db.cacheReceiptList(groupId, receipts);
       } catch (error) {
-        if (!(error instanceof OfflineError)) set({ loadError: messageOf(error) });
+        if (error instanceof OfflineError) log.debug('group: offline, keeping the cache');
+        else {
+          log.error('group: load failed', error);
+          set({ loadError: messageOf(error) });
+        }
       } finally {
         set({ loadingReceipts: false });
       }
     },
 
     async joinGroup(shareUrl) {
+      log.info('joining a group through a share link');
       const group = await api.joinGroup(shareUrl);
+      log.info('group joined', { group: group.id, members: group.members.length });
       void db.cacheGroup(group);
       await get().refreshGroups();
       return group;
@@ -371,11 +424,13 @@ export const useAppStore = create<AppStore>((set, get) => {
 
     async refreshMembers(groupId) {
       const group = await api.refreshMembers(groupId);
+      log.info('members resynchronised', { group: groupId, members: group.members.length });
       set({ group });
       void db.cacheGroup(group);
     },
 
     async leaveGroup(groupId) {
+      log.info('leaving group', { group: groupId });
       await api.leaveGroup(groupId);
       set((state) => ({
         groups: state.groups.filter((entry) => entry.id !== groupId),
@@ -384,9 +439,10 @@ export const useAppStore = create<AppStore>((set, get) => {
       void db.cacheGroups(get().groups);
     },
 
-    // ── Tickets ──────────────────────────────────────────────────────────────
+    // ── Receipts ─────────────────────────────────────────────────────────────
 
     async openReceipt(receiptId) {
+      log.info('opening receipt', { receipt: receiptId });
       cancelTimer();
       const cached = await db.cachedReceipt(receiptId);
       set({
@@ -398,10 +454,20 @@ export const useAppStore = create<AppStore>((set, get) => {
       });
       try {
         const receipt = await api.readReceipt(receiptId);
+        log.debug('receipt loaded', {
+          receipt: receiptId,
+          version: receipt.version,
+          step: receipt.step,
+          lines: receipt.lines.length,
+        });
         set({ receipt });
         void db.cacheReceipt(receipt);
       } catch (error) {
-        if (!(error instanceof OfflineError)) set({ loadError: messageOf(error) });
+        if (error instanceof OfflineError) log.debug('receipt: offline, keeping the cache');
+        else {
+          log.error('receipt: load failed', error);
+          set({ loadError: messageOf(error) });
+        }
       } finally {
         set({ loadingReceipt: false });
       }
@@ -409,6 +475,7 @@ export const useAppStore = create<AppStore>((set, get) => {
 
     async createReceipt(groupId) {
       const receipt = await api.createReceipt(groupId);
+      log.info('receipt created', { receipt: receipt.id, group: groupId });
       set((state) => ({ receipt, saveState: 'idle', saveError: null, conflict: null,
         receipts: state.receipts }));
       void db.cacheReceipt(receipt);
@@ -431,6 +498,7 @@ export const useAppStore = create<AppStore>((set, get) => {
     },
 
     async removeReceipt(receiptId) {
+      log.info('deleting receipt', { receipt: receiptId });
       await api.deleteReceipt(receiptId);
       set((state) => ({
         receipts: state.receipts.filter((entry) => entry.id !== receiptId),
@@ -440,10 +508,14 @@ export const useAppStore = create<AppStore>((set, get) => {
     },
 
     keepServerVersion() {
-      // L'utilisateur renonce à ses corrections : on repart de la version du
-      // serveur, qui redevient la base des prochaines écritures.
+      // The user gives up on their edits: we start again from the server
+      // version, which becomes the base for the next writes.
       const server = get().conflict;
       if (!server) return;
+      log.info('conflict arbitrated: the server version wins', {
+        receipt: server.id,
+        version: server.version,
+      });
       set({ receipt: server, conflict: null, saveState: 'idle', saveError: null });
       void db.cacheReceipt(server);
     },
@@ -452,7 +524,7 @@ export const useAppStore = create<AppStore>((set, get) => {
       set({ saveError: null, saveState: 'idle' });
     },
 
-    // ── Réglages ─────────────────────────────────────────────────────────────
+    // ── Settings ─────────────────────────────────────────────────────────────
 
     async updateSettings(patch) {
       const settings = { ...get().settings, ...patch };
@@ -461,6 +533,8 @@ export const useAppStore = create<AppStore>((set, get) => {
     },
 
     async updateServerSettings(patch) {
+      // The values themselves stay in: one of them is a Gemini key.
+      log.info('server settings changed', { fields: Object.keys(patch) });
       const server = await api.updateServerSettings(patch);
       set({ server });
     },
@@ -468,10 +542,17 @@ export const useAppStore = create<AppStore>((set, get) => {
     async refreshMe() {
       try {
         const me = await api.me();
+        log.debug('identity and server settings', {
+          device: me.deviceId,
+          account: me.accountEmail !== null,
+          geminiKey: me.settings.hasGeminiKey,
+          model: me.settings.geminiModel,
+        });
         set({ server: me.settings, accountEmail: me.accountEmail });
-      } catch {
-        // Sans réseau, on garde ce qu'on savait : les réglages serveur ne
-        // bloquent aucun écran.
+      } catch (error) {
+        log.debug('server settings unavailable, keeping the previous ones', error);
+        // With no network we keep what we knew: server settings do not block
+        // any screen.
       }
     },
   };

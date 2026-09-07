@@ -6,9 +6,9 @@ RUN npm ci
 
 COPY . .
 
-# Ces valeurs sont intégrées au paquet livré et donc PUBLIQUES.
-# N'y placez jamais de secret : la clé Gemini et le jeton d'appareil vivent
-# côté API, pas dans le bundle.
+# These values are baked into the shipped bundle and are therefore PUBLIC.
+# Never put a secret here: the Gemini key and the device token live on the API
+# side, not in the bundle.
 ARG VITE_API_URL=
 ARG VITE_SIGNUP_KEY=
 ENV VITE_API_URL=$VITE_API_URL \

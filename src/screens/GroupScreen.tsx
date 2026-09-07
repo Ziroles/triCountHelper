@@ -11,7 +11,7 @@ import { formatCents } from '../lib/money';
 import { formatFrenchDate } from '../lib/export';
 import type { ReceiptSummary } from '../types';
 
-/** Les tickets d'un groupe, et ses participants tels que Tricount les connaît. */
+/** A group's receipts, and its participants as Tricount knows them. */
 
 function ReceiptRow({
   receipt,
