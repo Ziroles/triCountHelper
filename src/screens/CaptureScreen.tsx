@@ -2,22 +2,43 @@ import { useEffect, useRef, useState } from 'react';
 import { Screen } from '../ui/Screen';
 import { Button } from '../ui/Button';
 import { CropBox } from '../ui/CropBox';
-import { FULL_CROP, normalizeCapture, rotateImage, type CropRect, type Rotation } from '../capture/image';
-import { getImage, putImage } from '../db';
-import { uid } from '../lib/id';
+import {
+  FULL_CROP,
+  downscaleForUpload,
+  normalizeCapture,
+  rotateImage,
+  type CropRect,
+  type Rotation,
+} from '../capture/image';
+import * as api from '../api';
+import { cacheImage, cachedImage } from '../db';
+import { logger } from '../lib/log';
 import { useAppStore } from '../store/useAppStore';
 import type { Receipt } from '../types';
+
+const log = logger('photo');
 
 type CaptureScreenProps = {
   receipt: Receipt;
   onBack: () => void;
   onDone: () => void;
-  /** Repartir vers la vérification sans relancer la lecture, quand elle a déjà eu lieu. */
+  /** Go back to verification without re-running the reading, when it already happened. */
   onSkip?: (() => void) | undefined;
+  /** Skip the photo and enter the receipt by hand. */
+  onManual: () => void;
 };
 
-export function CaptureScreen({ receipt, onBack, onDone, onSkip }: CaptureScreenProps) {
+/**
+ * Receipt photo: framing, rotation, upload.
+ *
+ * Cropping and downscaling stay **client-side**, before the upload. It is the
+ * only way to send nothing but a sharp, light receipt over a mobile network: an
+ * 8 Mpx photo rarely gets through a metro tunnel well, and the useful part is
+ * often less than a third of it.
+ */
+export function CaptureScreen({ receipt, onBack, onDone, onSkip, onManual }: CaptureScreenProps) {
   const updateReceipt = useAppStore((s) => s.updateReceipt);
+  const online = useAppStore((s) => s.online);
   const [original, setOriginal] = useState<Blob | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [rotation, setRotation] = useState<Rotation>(0);
@@ -29,23 +50,24 @@ export function CaptureScreen({ receipt, onBack, onDone, onSkip }: CaptureScreen
   const fileInput = useRef<HTMLInputElement>(null);
   const userPicked = useRef(false);
 
-  /* Le ticket garde sa photo en base : en revenant sur cet écran, on la remet
-     sous les yeux plutôt que de présenter une zone de dépôt vide. */
-  const storedKey = receipt.imageBlobKey;
+  /* The receipt keeps its photo: coming back to this screen puts it back in
+     front of the user rather than showing an empty drop zone. */
+  const imageId = receipt.imageId;
   useEffect(() => {
-    if (!storedKey) return undefined;
+    if (!imageId) return undefined;
     let cancelled = false;
     void (async () => {
-      const blob = await getImage(storedKey);
-      // Une photo choisie entre-temps prime sur celle qui dormait en base.
+      const blob = (await cachedImage(receipt.id)) ?? (await api.readImage(receipt.id).catch(() => null));
+      // A photo picked in the meantime wins over the one sleeping in the cache.
       if (cancelled || !blob || userPicked.current) return;
+      void cacheImage(receipt.id, blob);
       setOriginal(blob);
       setRestored(true);
     })();
     return () => {
       cancelled = true;
     };
-  }, [storedKey]);
+  }, [imageId, receipt.id]);
 
   useEffect(() => {
     let revoked: string | null = null;
@@ -73,6 +95,11 @@ export function CaptureScreen({ receipt, onBack, onDone, onSkip }: CaptureScreen
       setError("Ce fichier n'est pas une image.");
       return;
     }
+    log.info('photo picked', {
+      name: file.name,
+      type: file.type,
+      size: `${Math.round(file.size / 1024)} KiB`,
+    });
     setError(null);
     userPicked.current = true;
     setRestored(false);
@@ -85,15 +112,36 @@ export function CaptureScreen({ receipt, onBack, onDone, onSkip }: CaptureScreen
     if (!original) return;
     setBusy(true);
     setError(null);
+    /* Every step divides the weight; this is the path we suspect first when an
+       upload drags or a server answers 413. The sizes make that suspicion
+       checkable instead of leaving it a hypothesis. */
+    const done = log.time(`preparing and uploading receipt ${receipt.id}`);
+    const kib = (blob: Blob) => Math.round(blob.size / 1024);
     try {
       const rotated = await rotateImage(original, rotation);
-      const { blob } = await normalizeCapture(rotated, { crop });
-      const key = receipt.imageBlobKey || uid();
-      await putImage(key, blob);
-      updateReceipt(receipt.id, { imageBlobKey: key, step: 'processing' });
+      const { blob, width, height } = await normalizeCapture(rotated, { crop });
+      // One last downscale right before the upload: this is what the model will
+      // receive, so it may as well be what goes over the network.
+      const upload = await downscaleForUpload(blob);
+      log.debug('image prepared', {
+        rotation,
+        crop,
+        original: `${kib(original)} KiB`,
+        cropped: `${width}×${height}, ${kib(blob)} KiB`,
+        uploaded: `${kib(upload)} KiB`,
+      });
+      const saved = await api.uploadImage(receipt.id, upload);
+      void cacheImage(receipt.id, upload);
+      done(`photo accepted, version ${saved.version}`);
+      updateReceipt({ ...saved, step: 'processing' });
       onDone();
-    } catch {
-      setError("L'image n'a pas pu être préparée. Réessayez avec une autre photo.");
+    } catch (cause) {
+      log.error('photo upload failed', cause);
+      setError(
+        cause instanceof Error
+          ? cause.message
+          : "L'image n'a pas pu être envoyée. Réessayez avec une autre photo.",
+      );
     } finally {
       setBusy(false);
     }
@@ -106,8 +154,8 @@ export function CaptureScreen({ receipt, onBack, onDone, onSkip }: CaptureScreen
       footer={
         preview ? (
           <>
-            <Button variant="primary" full disabled={busy} onClick={() => void confirm()}>
-              {busy ? 'Préparation…' : restored ? 'Relire le ticket' : 'Lire le ticket'}
+            <Button variant="primary" full disabled={busy || !online} onClick={() => void confirm()}>
+              {busy ? 'Envoi…' : restored ? 'Relire le ticket' : 'Lire le ticket'}
             </Button>
             {onSkip ? (
               <button type="button" className="linkButton linkButton--center" onClick={onSkip}>
@@ -123,9 +171,14 @@ export function CaptureScreen({ receipt, onBack, onDone, onSkip }: CaptureScreen
             </button>
           </>
         ) : (
-          <Button variant="primary" full onClick={() => fileInput.current?.click()}>
-            Prendre une photo
-          </Button>
+          <>
+            <Button variant="primary" full onClick={() => fileInput.current?.click()}>
+              Prendre une photo
+            </Button>
+            <button type="button" className="linkButton linkButton--center" onClick={onManual}>
+              Saisir le ticket à la main
+            </button>
+          </>
         )
       }
     >
@@ -171,6 +224,13 @@ export function CaptureScreen({ receipt, onBack, onDone, onSkip }: CaptureScreen
       )}
 
       {error ? <p className="warnText">{error}</p> : null}
+
+      {!online ? (
+        <p className="warnText">
+          Hors ligne : la photo ne peut pas être envoyée. La saisie à la main reste possible
+          dès que le réseau revient.
+        </p>
+      ) : null}
 
       {restored ? (
         <p className="muted">

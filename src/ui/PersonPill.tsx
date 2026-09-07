@@ -6,7 +6,7 @@ import type { Person } from '../types';
 type PersonPillProps = {
   person: Person;
   selected?: boolean;
-  /** Répartition par défaut : la personne n'a pas été désignée à la main. */
+  /** Default split: the person was not picked by hand. */
   ghost?: boolean;
   size?: 'sm' | 'md';
   onClick?: () => void;

@@ -2,12 +2,9 @@ import { useEffect, useState } from 'react';
 import { Screen } from '../ui/Screen';
 import { Button } from '../ui/Button';
 import { Sheet } from '../ui/Sheet';
-import { PersonPill } from '../ui/PersonPill';
 import { useAppStore } from '../store/useAppStore';
-import { estimateStorage, purgeOldImages } from '../db';
-import { DEFAULT_GEMINI_MODEL } from '../extraction/model';
-import { listModels, type AvailableModel } from '../extraction/gemini';
-import { TricountSettings } from '../integrations/tricount/TricountSettings';
+import { clearCache, estimateStorage, forgetEverything } from '../db';
+import * as api from '../api';
 import { TAX_REGIMES, type TipBasis } from '../types';
 
 function formatBytes(bytes: number): string {
@@ -16,123 +13,134 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} Mo`;
 }
 
+/**
+ * Settings.
+ *
+ * Two kinds of settings live side by side, and the distinction is visible on
+ * screen: what belongs to this device (theme, defaults) and what the server
+ * holds for you (Gemini key, account). The key is never shown again — only a
+ * few characters, enough to recognise which one is in place.
+ */
 export function SettingsScreen() {
   const navigate = useAppStore((s) => s.navigate);
-  const people = useAppStore((s) => s.people);
   const settings = useAppStore((s) => s.settings);
-  const addPerson = useAppStore((s) => s.addPerson);
-  const renamePerson = useAppStore((s) => s.renamePerson);
-  const removePerson = useAppStore((s) => s.removePerson);
+  const server = useAppStore((s) => s.server);
+  const accountEmail = useAppStore((s) => s.accountEmail);
+  const online = useAppStore((s) => s.online);
   const updateSettings = useAppStore((s) => s.updateSettings);
-  const wipeEverything = useAppStore((s) => s.wipeEverything);
+  const updateServerSettings = useAppStore((s) => s.updateServerSettings);
+  const refreshMe = useAppStore((s) => s.refreshMe);
 
-  const [newName, setNewName] = useState('');
-  const [storage, setStorage] = useState<{ usage: number; quota: number } | null>(null);
-  const [showKey, setShowKey] = useState(false);
-  const [models, setModels] = useState<AvailableModel[] | null>(null);
+  const [keyDraft, setKeyDraft] = useState('');
+  const [keyStatus, setKeyStatus] = useState<string | null>(null);
+  const [models, setModels] = useState<{ name: string; displayName: string }[] | null>(null);
   const [modelsStatus, setModelsStatus] = useState<string | null>(null);
+  const [storage, setStorage] = useState<{ usage: number; quota: number } | null>(null);
   const [confirmWipe, setConfirmWipe] = useState(false);
+
+  // Optional account.
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [accountStatus, setAccountStatus] = useState<string | null>(null);
 
   const refreshStorage = () => {
     void estimateStorage().then(setStorage);
   };
-
   useEffect(refreshStorage, []);
 
-  return (
-    <Screen title="Réglages" onBack={() => navigate({ name: 'home' })}>
-      <section className="section">
-        <h2>Participants</h2>
-        <p className="muted">Ils sont conservés d’un ticket à l’autre.</p>
-        <ul className="people">
-          {people.map((person) => (
-            <li key={person.id} className="people__row">
-              <PersonPill person={person} size="sm" />
-              <input
-                type="text"
-                value={person.name}
-                aria-label={`Nom de ${person.name}`}
-                onChange={(event) => void renamePerson(person.id, event.target.value)}
-              />
-              <button
-                type="button"
-                className="iconButton iconButton--quiet"
-                aria-label={`Retirer ${person.name}`}
-                onClick={() => void removePerson(person.id)}
-              >
-                ✕
-              </button>
-            </li>
-          ))}
-        </ul>
-        <form
-          className="row row--gap"
-          onSubmit={(event) => {
-            event.preventDefault();
-            void addPerson(newName);
-            setNewName('');
-          }}
-        >
-          <input
-            type="text"
-            className="grow"
-            value={newName}
-            placeholder="Ajouter un participant"
-            aria-label="Nom du nouveau participant"
-            onChange={(event) => setNewName(event.target.value)}
-          />
-          <Button type="submit" disabled={newName.trim() === ''}>
-            Ajouter
-          </Button>
-        </form>
-      </section>
+  const saveKey = async (value: string) => {
+    setKeyStatus('Enregistrement…');
+    try {
+      await updateServerSettings({ geminiApiKey: value });
+      setKeyDraft('');
+      setKeyStatus(value === '' ? 'Clé effacée.' : 'Clé enregistrée.');
+    } catch (error) {
+      setKeyStatus(error instanceof Error ? error.message : 'Échec.');
+    }
+  };
 
+  const noKeyAnywhere = !server.hasGeminiKey && !server.serverHasGeminiKey;
+
+  return (
+    <Screen title="Réglages" onBack={() => navigate({ name: 'groups' })}>
       <section className="section">
         <h2>Lecture des tickets</h2>
         <p className="muted">
-          Les tickets sont lus par un modèle Gemini. <strong>La photo est envoyée à
-          Google</strong> pour cette seule opération : c’est la seule donnée qui quitte
-          l’appareil. Sans clé, tout le reste de l’application fonctionne, en saisie
-          manuelle.
+          Les tickets sont lus par un modèle Gemini, appelé par le serveur.{' '}
+          <strong>La photo est envoyée à Google</strong> pour cette seule opération.
         </p>
+
+        {noKeyAnywhere ? (
+          <p className="warnText">
+            Aucune clé Gemini n’est disponible : ce serveur n’en fournit pas. Renseignez la
+            vôtre ci-dessous pour lire des tickets en photo. Sans clé, la saisie à la main
+            fonctionne normalement.
+          </p>
+        ) : server.hasGeminiKey ? (
+          <p className="muted">
+            Votre clé <span className="num">{server.geminiKeyHint}</span> est enregistrée, et
+            elle est utilisée en priorité.
+          </p>
+        ) : (
+          <p className="muted">
+            Ce serveur fournit une clé. Vous pouvez enregistrer la vôtre pour que vos lectures
+            soient débitées sur votre quota.
+          </p>
+        )}
+
         <label className="field">
           <span className="field__label">
-            Clé API
-            <span className="muted"> — conservée sur cet appareil uniquement</span>
+            Votre clé API
+            <span className="muted"> — conservée chiffrée par le serveur</span>
           </span>
           <div className="row row--gap">
             <input
-              type={showKey ? 'text' : 'password'}
+              type="password"
               className="grow"
               autoComplete="off"
               spellCheck={false}
-              placeholder="AIza…"
-              value={settings.geminiApiKey}
-              onChange={(event) => void updateSettings({ geminiApiKey: event.target.value })}
+              placeholder={server.hasGeminiKey ? '••••••••' : 'AIza…'}
+              value={keyDraft}
+              onChange={(event) => setKeyDraft(event.target.value)}
             />
-            <Button onClick={() => setShowKey((value) => !value)}>
-              {showKey ? 'Masquer' : 'Afficher'}
+            <Button
+              disabled={!online || keyDraft.trim() === ''}
+              onClick={() => void saveKey(keyDraft.trim())}
+            >
+              Enregistrer
             </Button>
           </div>
         </label>
+        {server.hasGeminiKey ? (
+          <Button variant="quiet" disabled={!online} onClick={() => void saveKey('')}>
+            Effacer ma clé
+          </Button>
+        ) : null}
+        {keyStatus ? <p className="muted">{keyStatus}</p> : null}
+
         <label className="field">
           <span className="field__label">
             Modèle
             <span className="muted"> — ces noms changent, demandez la liste à jour</span>
           </span>
           {models === null ? (
+            /* Free-form entry until we have the list: we only publish on field
+               blur, so as not to write to the server on every keystroke. */
             <input
               type="text"
               autoComplete="off"
               spellCheck={false}
-              placeholder={DEFAULT_GEMINI_MODEL}
-              value={settings.geminiModel}
-              onChange={(event) => void updateSettings({ geminiModel: event.target.value })}
+              defaultValue={server.geminiModel}
+              key={server.geminiModel}
+              onBlur={(event) => {
+                const value = event.target.value.trim();
+                if (value !== server.geminiModel) void updateServerSettings({ geminiModel: value });
+              }}
             />
           ) : (
             <select
-              value={models.some((m) => m.name === settings.geminiModel) ? settings.geminiModel : ''}
-              onChange={(event) => void updateSettings({ geminiModel: event.target.value })}
+              value={models.some((m) => m.name === server.geminiModel) ? server.geminiModel : ''}
+              onChange={(event) => void updateServerSettings({ geminiModel: event.target.value })}
             >
               <option value="" disabled>
                 Choisir un modèle…
@@ -146,21 +154,24 @@ export function SettingsScreen() {
           )}
         </label>
         <Button
-          disabled={settings.geminiApiKey.trim() === '' || modelsStatus === 'Vérification…'}
+          disabled={!online || noKeyAnywhere || modelsStatus === 'Vérification…'}
           onClick={() => {
             setModelsStatus('Vérification…');
-            void listModels(settings.geminiApiKey)
+            void api
+              .listModels()
               .then((found) => {
                 setModels(found);
                 setModelsStatus(
-                  found.some((m) => m.name === settings.geminiModel)
+                  found.some((m) => m.name === server.geminiModel)
                     ? `Clé valide, ${found.length} modèles. Le modèle choisi existe.`
-                    : `Clé valide, ${found.length} modèles. « ${settings.geminiModel} » n’en fait pas partie : choisissez-en un.`,
+                    : `Clé valide, ${found.length} modèles. « ${server.geminiModel} » n’en fait pas partie : choisissez-en un.`,
                 );
               })
               .catch((error: unknown) => {
                 setModels(null);
-                setModelsStatus(error instanceof Error ? error.message : 'Échec de la vérification.');
+                setModelsStatus(
+                  error instanceof Error ? error.message : 'Échec de la vérification.',
+                );
               });
           }}
         >
@@ -227,41 +238,6 @@ export function SettingsScreen() {
       </section>
 
       <section className="section">
-        <h2>Photos</h2>
-        <label className="field">
-          <span className="field__label">Effacer les photos après</span>
-          <select
-            value={settings.imageRetentionDays}
-            onChange={(event) =>
-              void updateSettings({ imageRetentionDays: Number(event.target.value) })
-            }
-          >
-            {[30, 60, 90, 180, 365].map((days) => (
-              <option key={days} value={days}>
-                {days} jours
-              </option>
-            ))}
-            <option value={0}>Jamais</option>
-          </select>
-        </label>
-        <p className="muted">
-          {storage
-            ? `Espace utilisé : ${formatBytes(storage.usage)}${
-                storage.quota ? ` sur ${formatBytes(storage.quota)}` : ''
-              }`
-            : 'Espace utilisé : inconnu'}
-        </p>
-        <Button
-          variant="quiet"
-          onClick={() => {
-            void purgeOldImages(settings.imageRetentionDays).finally(refreshStorage);
-          }}
-        >
-          Purger les anciennes photos
-        </Button>
-      </section>
-
-      <section className="section">
         <h2>Apparence</h2>
         <label className="field">
           <span className="field__label">Thème</span>
@@ -278,24 +254,115 @@ export function SettingsScreen() {
         </label>
       </section>
 
-      <TricountSettings />
+      <section className="section">
+        <h2>Synchronisation</h2>
+        {accountEmail ? (
+          <p className="muted">
+            Cet appareil est rattaché à <strong>{accountEmail}</strong>. Vos groupes suivent ce
+            compte : connectez-vous avec la même adresse sur un autre appareil pour les y
+            retrouver.
+          </p>
+        ) : (
+          <>
+            <p className="muted">
+              Cet appareil fonctionne sans compte, et c’est suffisant. Un compte ne sert qu’à
+              une chose : retrouver vos groupes depuis un autre appareil — ou après avoir
+              changé de téléphone.
+            </p>
+            <label className="field">
+              <span className="field__label">Adresse courriel</span>
+              <input
+                type="email"
+                autoComplete="email"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+              />
+            </label>
+            <label className="field">
+              <span className="field__label">Mot de passe</span>
+              <input
+                type="password"
+                autoComplete="current-password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+              />
+            </label>
+            <div className="row row--gap">
+              <Button
+                full
+                disabled={!online || email.trim() === '' || password.length < 8}
+                onClick={() => {
+                  setAccountStatus('…');
+                  void api
+                    .createAccount(email.trim(), password)
+                    .then(() => {
+                      setPassword('');
+                      setAccountStatus(null);
+                      return refreshMe();
+                    })
+                    .catch((error: unknown) =>
+                      setAccountStatus(error instanceof Error ? error.message : 'Échec.'),
+                    );
+                }}
+              >
+                Créer un compte
+              </Button>
+              <Button
+                full
+                disabled={!online || email.trim() === '' || password === ''}
+                onClick={() => {
+                  setAccountStatus('…');
+                  void api
+                    .openSession(email.trim(), password)
+                    .then(() => {
+                      setPassword('');
+                      setAccountStatus(null);
+                      return refreshMe();
+                    })
+                    .catch((error: unknown) =>
+                      setAccountStatus(error instanceof Error ? error.message : 'Échec.'),
+                    );
+                }}
+              >
+                Se connecter
+              </Button>
+            </div>
+            <p className="muted">Le mot de passe doit faire au moins 8 caractères.</p>
+            {accountStatus ? <p className="warnText">{accountStatus}</p> : null}
+          </>
+        )}
+      </section>
 
       <section className="section">
         <h2>Données</h2>
         <p className="muted">
-          Les photos, les tickets, les participants et la clé API sont stockés localement, dans
-          le navigateur de cet appareil. Rien n’est synchronisé, rien n’est partagé. Deux
-          exceptions, toutes deux explicites : la photo envoyée à Google au moment de la lecture
-          d’un ticket, et le récapitulatif transmis à Tricount si vous activez cet envoi.
+          Les tickets, les photos et les groupes sont conservés par le serveur, pour que tous
+          les participants d’un groupe voient les mêmes montants. Cet appareil n’en garde
+          qu’une copie de lecture, pour rester consultable hors ligne.
         </p>
+        <p className="muted">
+          {storage
+            ? `Cache local : ${formatBytes(storage.usage)}${
+                storage.quota ? ` sur ${formatBytes(storage.quota)}` : ''
+              }`
+            : 'Cache local : taille inconnue'}
+        </p>
+        <Button
+          variant="quiet"
+          onClick={() => {
+            void clearCache().finally(refreshStorage);
+          }}
+        >
+          Vider le cache local
+        </Button>
         <Button variant="danger" onClick={() => setConfirmWipe(true)}>
-          Tout effacer
+          Dissocier cet appareil
         </Button>
       </section>
 
       <Sheet
         open={confirmWipe}
-        title="Tout effacer"
+        title="Dissocier cet appareil"
         onClose={() => setConfirmWipe(false)}
         footer={
           <div className="row row--gap">
@@ -306,18 +373,22 @@ export function SettingsScreen() {
               variant="danger"
               full
               onClick={() => {
-                void wipeEverything();
-                setConfirmWipe(false);
+                void forgetEverything().then(() => window.location.reload());
               }}
             >
-              Tout effacer
+              Dissocier
             </Button>
           </div>
         }
       >
         <p className="muted">
-          Tous les tickets, les photos, les participants et les réglages seront supprimés. Cette
-          action est irréversible.
+          Cet appareil oubliera son identité et son cache, puis s’enrôlera à nouveau comme un
+          appareil neuf.
+        </p>
+        <p className="muted">
+          {accountEmail
+            ? 'Vos groupes restent attachés à votre compte : reconnectez-vous pour les retrouver.'
+            : 'Sans compte, vos groupes ne seront plus accessibles depuis cet appareil — il faudra recoller leurs liens de partage. Les tickets, eux, restent côté serveur pour les autres participants.'}
         </p>
       </Sheet>
     </Screen>

@@ -229,7 +229,7 @@ describe('settle — lignes non attribuées', () => {
     expect(s.autoSplitLinesCents).toBe(600);
     expect(s.unassignedLineIds).toEqual([]);
     expect(s.unassignedLinesCents).toBe(0);
-    // 900 à p1, puis 600 partagés en trois.
+    // 900 to p1, then 600 shared three ways.
     expect(s.people.map((p) => p.totalCents)).toEqual([1100, 200, 200]);
     expect(s.distributedTotalCents).toBe(1500);
     expect(s.subtotalCents).toBe(1500);

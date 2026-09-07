@@ -1,9 +1,45 @@
-import { DEFAULT_GEMINI_MODEL } from './extraction/model';
+/**
+ * The client's domain model.
+ *
+ * A "participant" is now a member of the tricount: their `id` is the uuid
+ * Tricount gives them. The field keeps its domain name — `personId` — rather
+ * than adopting `memberUuid`: `lib/compute.ts` splits money between people, and
+ * has no business knowing where those people come from. The translation to the
+ * API's vocabulary happens at the boundary, in `api/receipts.ts`, and nowhere
+ * else.
+ */
 
 export type Person = {
   id: string;
   name: string;
   color?: string;
+};
+
+/** Member of a tricount, as the API returns it. */
+export type Member = {
+  uuid: string;
+  displayName: string;
+  status: string;
+};
+
+/** A group is a tricount; its identifier is the invitation code. */
+export type Group = {
+  id: string;
+  title: string;
+  currency: string;
+  members: Member[];
+  membersSyncedAt: string | null;
+  receiptCount: number;
+  lastActivityAt: string | null;
+};
+
+export type GroupSummary = {
+  id: string;
+  title: string;
+  currency: string;
+  memberCount: number;
+  receiptCount: number;
+  lastActivityAt: string | null;
 };
 
 export type ReceiptTax = {
@@ -48,6 +84,7 @@ export function regimeByCode(code: string): TaxRegime {
 }
 
 export type Assignment = {
+  /** Uuid of the Tricount member this share belongs to. */
   personId: string;
   shares: number;
 };
@@ -77,13 +114,20 @@ export type Adjustment = {
 
 export type ReceiptStatus = 'draft' | 'settled';
 
+export type ReceiptStep = 'capture' | 'processing' | 'verify' | 'assign' | 'results';
+
+export type TipBasis = 'subtotal' | 'total';
+
 export type Receipt = {
   id: string;
+  groupId: string;
   createdAt: string;
   updatedAt: string;
+  /** Optimistic lock: the server refuses a write started from a stale version. */
+  version: number;
+  imageId: string | null;
   merchant: string | null;
   purchaseDate: string | null;
-  imageBlobKey: string;
   lines: ReceiptLine[];
   taxes: ReceiptTax[];
   adjustments: Adjustment[];
@@ -95,34 +139,53 @@ export type Receipt = {
   step: ReceiptStep;
 };
 
-export type ReceiptStep = 'capture' | 'processing' | 'verify' | 'assign' | 'results';
+/** Lightweight view for a group's receipt list. */
+export type ReceiptSummary = {
+  id: string;
+  groupId: string;
+  merchant: string | null;
+  purchaseDate: string | null;
+  status: ReceiptStatus;
+  step: ReceiptStep;
+  totalCents: number;
+  lineCount: number;
+  hasImage: boolean;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+};
 
-export type TipBasis = 'subtotal' | 'total';
-
+/**
+ * Display settings, specific to the device.
+ *
+ * The Gemini key is no longer here: it lives on the server, encrypted, and
+ * never comes back down in full. See `ServerSettings`.
+ */
 export type Settings = {
-  imageRetentionDays: number;
   taxRegimeCode: string;
   defaultTipPercent: number;
   defaultTipBasis: TipBasis;
-  geminiApiKey: string;
-  geminiModel: string;
-  tricountEnabled: boolean;
-  tricountShareUrl: string;
-  tricountRelayUrl: string;
-  tricountToken: string;
   theme: 'system' | 'light' | 'dark';
 };
 
 export const DEFAULT_SETTINGS: Settings = {
-  imageRetentionDays: 90,
   taxRegimeCode: DEFAULT_REGIME_CODE,
   defaultTipPercent: 18,
   defaultTipBasis: 'subtotal',
-  geminiApiKey: '',
-  geminiModel: DEFAULT_GEMINI_MODEL,
-  tricountEnabled: false,
-  tricountShareUrl: '',
-  tricountRelayUrl: '',
-  tricountToken: '',
   theme: 'system',
+};
+
+/** Settings held by the API on this user's behalf. */
+export type ServerSettings = {
+  hasGeminiKey: boolean;
+  geminiKeyHint: string | null;
+  serverHasGeminiKey: boolean;
+  geminiModel: string;
+};
+
+export const DEFAULT_SERVER_SETTINGS: ServerSettings = {
+  hasGeminiKey: false,
+  geminiKeyHint: null,
+  serverHasGeminiKey: false,
+  geminiModel: '',
 };

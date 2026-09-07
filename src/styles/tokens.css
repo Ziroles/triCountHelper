@@ -8,8 +8,8 @@
   --accent-ink: #fafaf9;
   --warn: #b45309;
 
-  /* Six teintes bien séparées, assez foncées pour porter du texte clair.
-     Le mode sombre les réclaire plus bas : le texte posé dessus est alors sombre. */
+  /* Six well-separated hues, dark enough to carry light text.
+     Dark mode lightens them further down: text laid on them is then dark. */
   --person-1: #2563eb;
   --person-2: #c2410c;
   --person-3: #15803d;

@@ -24,9 +24,9 @@ type QuantityInputProps = {
   onChange: (quantity: number) => void;
 };
 
-/* Vider le champ pour retaper une quantité ne doit pas faire passer la ligne par
-   « 1 unité » : ce détour rebaserait le prix unitaire et emporterait des centimes.
-   Le champ garde donc sa saisie en cours et ne publie que les quantités valides. */
+/* Clearing the field to retype a quantity must not take the line through
+   "1 unit": that detour would rebase the unit price and carry off a few cents.
+   So the field keeps its in-progress input and only publishes valid quantities. */
 function QuantityInput({ value, onChange }: QuantityInputProps) {
   const [draft, setDraft] = useState(() => String(value));
   const focused = useRef(false);
@@ -80,7 +80,7 @@ function emptyLine(): ReceiptLine {
 export function VerifyScreen({ receipt, onBack, onDone }: VerifyScreenProps) {
   const updateReceipt = useAppStore((s) => s.updateReceipt);
   const [photoOpen, setPhotoOpen] = useState(false);
-  const imageUrl = useReceiptImage(receipt.imageBlobKey);
+  const imageUrl = useReceiptImage(receipt.id, receipt.imageId);
 
   const settings = useAppStore((s) => s.settings);
   const subtotal = useMemo(() => subtotalOf(receipt), [receipt]);
@@ -93,7 +93,7 @@ export function VerifyScreen({ receipt, onBack, onDone }: VerifyScreenProps) {
     receipt.statedSubtotalCents === null ? 0 : subtotal - receipt.statedSubtotalCents;
 
   const patchLine = (id: string, patch: Partial<ReceiptLine>) => {
-    updateReceipt(receipt.id, (current) => ({
+    updateReceipt((current) => ({
       ...current,
       lines: current.lines.map((line) => (line.id === id ? { ...line, ...patch } : line)),
     }));
@@ -102,9 +102,9 @@ export function VerifyScreen({ receipt, onBack, onDone }: VerifyScreenProps) {
   const setQuantity = (line: ReceiptLine, quantity: number) => {
     const safe = Number.isFinite(quantity) && quantity > 0 ? Math.floor(quantity) : 1;
     if (safe === line.quantity) return;
-    /* Le prix unitaire affiché est un arrondi : 3 bières à 10,00 $ s'affichent
-       3 × 3,33. Repartir de lui ferait tomber la ligne à 9,99 $. On remet donc à
-       l'échelle le total réel, seul montant qui figure sur le ticket. */
+    /* The displayed unit price is a rounding: 3 beers at $10.00 show as
+       3 × 3.33. Starting from it would drop the line to $9.99. So we rescale the
+       real total, the only amount that appears on the receipt. */
     const totalCents = roundHalfUp((line.totalCents / Math.max(1, line.quantity)) * safe);
     patchLine(line.id, {
       quantity: safe,
@@ -125,32 +125,32 @@ export function VerifyScreen({ receipt, onBack, onDone }: VerifyScreenProps) {
   const setTotal = (line: ReceiptLine, totalCents: number) => {
     patchLine(line.id, {
       totalCents,
-      // Le total saisi fait foi ; le prix unitaire n'en est que l'affichage arrondi.
+      // The entered total is authoritative; the unit price is only its rounded display.
       unitPriceCents: roundHalfUp(totalCents / Math.max(1, line.quantity)),
       isManual: true,
     });
   };
 
   const addLine = () => {
-    updateReceipt(receipt.id, (current) => ({ ...current, lines: [...current.lines, emptyLine()] }));
+    updateReceipt((current) => ({ ...current, lines: [...current.lines, emptyLine()] }));
   };
 
   const removeLine = (id: string) => {
-    updateReceipt(receipt.id, (current) => ({
+    updateReceipt((current) => ({
       ...current,
       lines: current.lines.filter((line) => line.id !== id),
     }));
   };
 
   const patchTax = (id: string, patch: Partial<ReceiptTax>) => {
-    updateReceipt(receipt.id, (current) => ({
+    updateReceipt((current) => ({
       ...current,
       taxes: current.taxes.map((tax) => (tax.id === id ? { ...tax, ...patch } : tax)),
     }));
   };
 
   const removeTax = (id: string) => {
-    updateReceipt(receipt.id, (current) => ({
+    updateReceipt((current) => ({
       ...current,
       taxes: current.taxes.filter((tax) => tax.id !== id),
     }));
@@ -158,7 +158,7 @@ export function VerifyScreen({ receipt, onBack, onDone }: VerifyScreenProps) {
 
   const addRegimeTaxes = () => {
     const regime = regimeByCode(settings.taxRegimeCode);
-    updateReceipt(receipt.id, (current) => ({
+    updateReceipt((current) => ({
       ...current,
       taxes: regime.taxes.map((tax) => ({
         id: uid(),
@@ -172,7 +172,7 @@ export function VerifyScreen({ receipt, onBack, onDone }: VerifyScreenProps) {
 
   const absorbGap = () => {
     if (gap === 0) return;
-    updateReceipt(receipt.id, (current) => ({
+    updateReceipt((current) => ({
       ...current,
       adjustments: [
         ...current.adjustments,
@@ -192,7 +192,7 @@ export function VerifyScreen({ receipt, onBack, onDone }: VerifyScreenProps) {
       title="Vérification"
       onBack={onBack}
       action={
-        receipt.imageBlobKey ? (
+        receipt.imageId ? (
           <button type="button" className="linkButton" onClick={() => setPhotoOpen(true)}>
             Voir la photo
           </button>
@@ -256,7 +256,7 @@ export function VerifyScreen({ receipt, onBack, onDone }: VerifyScreenProps) {
             value={receipt.merchant ?? ''}
             placeholder="Carrefour, boulangerie…"
             onChange={(event) =>
-              updateReceipt(receipt.id, { merchant: event.target.value || null })
+              updateReceipt({ merchant: event.target.value || null })
             }
           />
         </label>
@@ -267,7 +267,7 @@ export function VerifyScreen({ receipt, onBack, onDone }: VerifyScreenProps) {
               type="date"
               value={receipt.purchaseDate ?? ''}
               onChange={(event) =>
-                updateReceipt(receipt.id, { purchaseDate: event.target.value || null })
+                updateReceipt({ purchaseDate: event.target.value || null })
               }
             />
           </label>
@@ -275,7 +275,7 @@ export function VerifyScreen({ receipt, onBack, onDone }: VerifyScreenProps) {
             <span className="field__label">Sous-total lu</span>
             <AmountInput
               valueCents={receipt.statedSubtotalCents}
-              onChange={(cents) => updateReceipt(receipt.id, { statedSubtotalCents: cents })}
+              onChange={(cents) => updateReceipt({ statedSubtotalCents: cents })}
               placeholder="—"
               aria-label="Sous-total lu sur le ticket"
             />
@@ -284,7 +284,7 @@ export function VerifyScreen({ receipt, onBack, onDone }: VerifyScreenProps) {
             <span className="field__label">Total lu</span>
             <AmountInput
               valueCents={receipt.statedTotalCents}
-              onChange={(cents) => updateReceipt(receipt.id, { statedTotalCents: cents })}
+              onChange={(cents) => updateReceipt({ statedTotalCents: cents })}
               placeholder="—"
               aria-label="Total lu sur le ticket"
             />
@@ -433,7 +433,7 @@ export function VerifyScreen({ receipt, onBack, onDone }: VerifyScreenProps) {
                   className="iconButton iconButton--quiet"
                   aria-label={`Supprimer ${adjustment.label}`}
                   onClick={() =>
-                    updateReceipt(receipt.id, (current) => ({
+                    updateReceipt((current) => ({
                       ...current,
                       adjustments: current.adjustments.filter((a) => a.id !== adjustment.id),
                     }))

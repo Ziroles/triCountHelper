@@ -38,8 +38,9 @@ export function AmountInput({
     }
     const next = allowNegative ? cents : Math.abs(cents);
     setDraft(centsToInput(next));
-    /* Un aller-retour dans le champ ne doit rien réécrire : republier une valeur
-       inchangée relancerait les calculs dérivés, qui perdent un centime au passage. */
+    /* A round trip through the field must not rewrite anything: republishing an
+       unchanged value would restart the derived computations, which lose a cent
+       along the way. */
     if (next !== valueCents) onChange(next);
   };
 

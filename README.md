@@ -1,218 +1,309 @@
 # SplitTicket
 
-A progressive web application (PWA) to photograph receipts, extract items and amounts via vision AI, assign each item to one or more people, and accurately compute what everyone owes.
+Une application web progressive (PWA) pour photographier un ticket de caisse, en extraire les
+lignes par IA de vision, attribuer chaque article à une ou plusieurs personnes, et calculer
+exactement ce que chacun doit.
 
-No accounts, no central backend, no sync. All data stays in the device's browser. **Two explicit exceptions only**: the receipt image sent to Google Gemini when scanning a receipt, and the summary dispatched to Tricount if you explicitly enable that integration.
+Les participants ne se saisissent pas : un **groupe** est un tricount, rejoint en collant son
+lien de partage, et ses membres deviennent les participants. Les tickets appartiennent au
+groupe — tous ses membres voient les mêmes montants, depuis n'importe quel appareil.
+
+> [!IMPORTANT]
+> **Où vivent vos données.** Les tickets, leurs photos et les groupes sont conservés par
+> l'[API SplitTicket](https://github.com/Ziroles/tricountApi), que vous hébergez. Ce n'est plus
+> une application locale : c'est ce qui permet à plusieurs personnes de partager un ticket, et
+> de retrouver le sien après avoir changé de téléphone.
+>
+> Chaque appareil garde une **copie de lecture** : hors ligne, l'application reste consultable,
+> mais toute modification attend le réseau.
+>
+> Deux tiers reçoivent des données, et seulement eux : **Google Gemini**, la photo d'un ticket
+> au moment de le lire, et **Tricount**, le récapitulatif si vous demandez l'envoi.
 
 ---
 
-## Prerequisites
+## Prérequis
 
-- **Node.js**: version 18+ or 20+ (LTS recommended) and `npm`
-- **Google Gemini API Key** (optional, required for automatic receipt OCR): you can generate one for free in a few seconds on [Google AI Studio](https://aistudio.google.com/).
+- **Node.js** 20+ (LTS recommandé) et `npm`
+- **L'API SplitTicket** en marche — voir [`tricountApi`](https://github.com/Ziroles/tricountApi).
+  Sans elle, l'application n'a rien à afficher.
+- **Une clé Google Gemini**, si votre instance n'en fournit pas. Elle se crée en quelques
+  secondes sur [Google AI Studio](https://aistudio.google.com/) et se colle dans les Réglages.
+  Sans clé, tout le reste fonctionne : saisie manuelle, taxes canadiennes, pourboire, export.
 
 ---
 
-## Getting Started
+## Démarrer
 
-1. **Clone the repository and install dependencies**:
+1. **Cloner et installer** :
    ```bash
    git clone https://github.com/MathieuMarthy/triCountHelper.git
    cd triCountHelper
    npm install
    ```
 
-2. **Configuration (optional)**:
-   If you want to enable the experimental Tricount integration in your development UI:
-   ```bash
-   cp .env.example .env.local
-   ```
-   Set `VITE_TRICOUNT_ENABLED=true` in `.env.local`.
+2. **Lancer l'API** (dans l'autre dépôt), sur le port 8787.
 
-3. **Start the development server**:
+3. **Lancer l'application** :
    ```bash
    npm run dev
    ```
-   Open the printed URL (typically `http://localhost:5173`) in your browser.
+   `/api` est déjà mandaté vers `http://localhost:8787` : il n'y a rien à configurer.
+   Ouvrez l'URL affichée, généralement `http://localhost:5173`.
 
-4. **Configure your Gemini API key**:
-   Enter your API key in **Settings** (gear icon). It is stored securely on your device inside IndexedDB.
-   Without a key, everything else still works: manual item entry, Canadian tax calculation, tip splitting, and text export.
+4. **Rejoindre un groupe** : collez le lien de partage d'un tricount. Ses participants
+   apparaissent aussitôt.
 
-| Command | Description |
+| Commande | Effet |
 |---|---|
-| `npm run dev` | Local development server with Hot Module Replacement |
-| `npm run build` | Optimized production build in `dist/` |
-| `npm run preview` | Serves `dist/` locally with active service worker |
-| `npm test` | Run unit test suite (Vitest) |
-| `npm run typecheck` | Run TypeScript type checking |
+| `npm run dev` | Serveur de développement, rechargement à chaud, `/api` mandaté, logs du navigateur dans ce terminal |
+| `npm run build` | Build de production dans `dist/` |
+| `npm run preview` | Sert `dist/` avec le service worker actif |
+| `npm test` | Suite de tests (Vitest) |
+| `npm run typecheck` | Vérification TypeScript |
 
-The resulting `dist/` folder is under 300 KB: pure static files. Any static host (Cloudflare Pages, Netlify, GitHub Pages, Vercel) works. For sub-path deployments (e.g. GitHub Pages), configure `base` in `vite.config.ts`.
+L'intégration continue (`.github/workflows/ci.yml`) lance typage, tests et build à chaque
+poussée et chaque demande de tirage.
+
+Le `dist/` produit fait environ 255 Kio : des fichiers statiques. N'importe quel hébergeur
+convient, à condition de mandater `/api` vers l'API — voir `docker/nginx.conf`.
+
+---
+
+## Journal
+
+**Les logs de l'application s'affichent dans le terminal, pas dans le navigateur.**
+
+En développement, chaque ligne remonte par le canal du HMR et s'écrit dans la console qui
+fait tourner `npm run dev`. C'est délibéré : l'application se teste au téléphone, ticket de
+caisse en main, et sur un téléphone il n'y a pas de console à ouvrir. Un seul journal, celui
+qu'on est déjà en train de lire.
+
+```
+22:20:34.329 info  boot         démarrage
+                                { mode: 'development', enLigne: true }
+22:20:34.329 debug api          GET /v1/groups → 200 en 34 ms
+22:20:34.329 warn  store        conflit de version : le ticket a bougé ailleurs
+                                { ticket: 'r-42', versionLocale: 7 }
+  → api  POST /v1/receipts/r-42/scan
+  ← api  POST /v1/receipts/r-42/scan → 200
+```
+
+Les lignes `→ api` / `← api` viennent du proxy Vite, pas de la page : c'est le seul point de
+vue qui distingue « l'API a répondu une erreur » de « l'API n'est pas lancée ».
+
+Sont instrumentées les frontières — réseau, cache IndexedDB, service worker, envoi vers le
+tricount — avec leur durée dès qu'il y a une attente. Le calcul de répartition ne l'est pas :
+il a des tests. S'y ajoutent les appels `console.*` de la page (avertissements de React
+compris) et les erreurs non rattrapées, qui arrivent ainsi au même endroit que le reste.
+
+| Variable | Effet |
+|---|---|
+| `VITE_LOG_LEVEL` | Seuil : `debug`, `info`, `warn`, `error`, `silent`. Défaut : `debug` en dev, `warn` en production |
+| `VITE_LOG_ECHO` | `1` pour écrire *aussi* dans la console du navigateur. Défaut : non |
+| `VITE_LOG_CONSOLE` | `0` pour cesser de renvoyer les `console.*` de la page. Défaut : renvoyés |
+
+En production, il n'y a pas de serveur à qui parler : seuls les avertissements et les erreurs
+vont à la console du navigateur. **Jetons, clés et mots de passe sont masqués avant l'envoi** —
+un terminal se relit à plusieurs et se colle dans des rapports.
+
+Le canal tient en deux fichiers : `tools/vite-plugin-dev-log.ts` côté serveur,
+`src/lib/log.ts` côté page.
 
 ---
 
 ## Docker
-
-The Docker image builds the app with Node and serves it via nginx; the final image (~49 MB) contains neither Node nor build dependencies.
 
 ```bash
 docker build -t splitticket .
 docker run -d -p 8080:80 splitticket
 ```
 
-Two optional build arguments:
+Deux arguments de build, tous deux **publics** puisqu'ils sont intégrés au paquet livré :
 
-| `--build-arg` | Effect |
+| `--build-arg` | Effet |
 |---|---|
-| `VITE_TRICOUNT_ENABLED` | `true` makes the Tricount integration appear in UI. Default: `false`. |
-| `VITE_TRICOUNT_RELAY_URL` | Default relay endpoint URL. Default: `/api/tricount`. |
+| `VITE_API_URL` | Adresse de l'API. Défaut : `/api`, c'est-à-dire la même origine. |
+| `VITE_SIGNUP_KEY` | Clé d'inscription, si l'instance en exige une pour enrôler un appareil. |
 
-```bash
-docker build -t splitticket \
-  --build-arg VITE_TRICOUNT_ENABLED=true \
-  --build-arg VITE_TRICOUNT_RELAY_URL=https://relay.example.com/api/tricount .
-```
+**N'y placez jamais de secret** : ni clé Gemini, ni mot de passe. La clé Gemini vit côté API,
+chiffrée ; le jeton d'appareil est délivré par l'API et n'existe pas dans le build.
 
-These values are baked into the client bundle and are public: **never pass secrets here**. The relay authentication token is entered in the in-app Settings on each device.
-
-`docker/nginx.conf` serves the app at root: immutable cache for hashed `/assets/`, `no-cache` for `index.html`, `sw.js`, and the manifest (the three controlling updates), with fallback to `index.html` for client routing. The container listens on HTTP; terminate TLS at your reverse proxy (required for PWA installation and service worker).
+`docker/nginx.conf` sert l'application à la racine et mandate `/api/` vers le conteneur
+`splitticket-api` — l'API se retrouve ainsi sur la même origine, ce qui supprime toute question
+de CORS. Le conteneur écoute en HTTP ; terminez le TLS sur votre reverse proxy (indispensable
+pour l'installation PWA et le service worker).
 
 ---
 
-## User Flow
+## Parcours
 
 ```
-Home ─→ Capture ─→ Processing ─→ Verification ─→ Assignment ─→ Results
-  ↑                                                               │
-  └───────────────────────────────────────────────────────────────┘
+Groupes ─→ Groupe ─→ Photo ─→ Lecture ─→ Vérification ─→ Attribution ─→ Résultats
+   ↑          ↑                                                            │
+   └──────────┴────────────────────────────────────────────────────────────┘
 ```
 
-Every step is auto-saved: closing and reopening the app restores your progress. A **fully manual entry mode** is accessible from Home; useful for testing the calculation pipeline without relying on the vision model.
+L'étape courante est mémorisée **sur le ticket, côté serveur** : le rouvrir plus tard, ou depuis
+un autre appareil, reprend là où il avait été laissé. La saisie manuelle est accessible depuis
+l'écran photo, pour tester la chaîne de calcul sans dépendre du modèle de vision.
 
-**Offline support**: only photo OCR requires internet access. Everything else (manual entry, adjustments, tax assignment, calculations, export) works completely offline.
+**Hors ligne** : les groupes et tickets déjà consultés restent lisibles. Créer ou modifier
+demande le réseau, et l'interface le dit — il n'y a pas de file de rejeu, parce que rejouer une
+écriture sur un ticket qu'un autre membre a modifié entre-temps reviendrait à inventer de
+l'argent.
+
+**Édition concurrente** : chaque écriture porte la version qu'elle croit modifier. Si quelqu'un
+est passé avant, le serveur refuse et l'application le dit, plutôt que d'écraser en silence.
+
+**Adresses** : chaque écran a la sienne — `/`, `/g/{groupe}`, `/g/{groupe}/t/{ticket}/{étape}`.
+Le geste retour du système recule d'un écran au lieu de quitter l'application, un lien s'ouvre
+directement au bon endroit, et un rechargement ne ramène pas à l'accueil. Une adresse inconnue
+retombe sur l'accueil plutôt que d'ouvrir un écran incohérent (`src/lib/routing.ts`).
+
+**Compatibilité** : au démarrage, l'application compare sa version de contrat à celle annoncée
+par `/health`. En cas d'écart — API et application déployées séparément — un bandeau le dit,
+au lieu de laisser des échecs inexplicables se produire plus tard.
 
 ---
 
-## Precision Financial Arithmetic
+## Arithmétique au centime
 
-All monetary values are **integer cents**. Floating point numbers are never used to represent money. Currency: Canadian Dollar (CAD).
+Toutes les valeurs monétaires sont des **centimes entiers**. Aucun flottant ne représente jamais
+de l'argent. Devise : dollar canadien.
 
-Splitting a line item between multiple people uses the **Largest Remainder Method** (`src/lib/split.ts`): each participant receives the integer floor of their share, and remainder cents are awarded to the highest decimal fractions (broken ties broken by participant order, never at random, ensuring deterministic recalculations).
+Le partage d'une ligne entre plusieurs personnes utilise la **méthode du plus fort reste**
+(`src/lib/split.ts`) : chacun reçoit la partie entière de sa part, et les centimes restants vont
+aux plus fortes décimales, les égalités étant tranchées par l'ordre des participants — jamais au
+hasard, pour que deux calculs identiques donnent le même résultat.
 
-**Core Invariant**:
-> Sum of amounts owed === Assigned subtotal + Distributed taxes + Adjustments + Tip
+**Invariant fondamental** :
+> Somme des montants dus === Sous-total attribué + Taxes réparties + Ajustements + Pourboire
 
-Tested against randomly generated receipts with mixed tax bases, discounts, and tips.
+Vérifié sur des tickets engendrés au hasard, avec bases de taxes mixtes, remises et pourboires.
 
-### Canadian Sales Taxes
+> **Le calcul reste dans le navigateur.** `settle()` est déterministe à partir du ticket et
+> alimente une interface vivante — le curseur de pourboire recalcule à chaque frappe. Le serveur
+> ne le refait pas ; il revérifie l'invariant au moment de l'envoi vers Tricount, là où une
+> erreur deviendrait irréversible.
 
-Unlike French/European receipts where displayed prices are tax-inclusive (TTC), **Canadian item prices are pre-tax (HT)**. GST/TPS, PST/TVQ, or HST/TVH are added at the bottom of the receipt.
+### Taxes canadiennes
 
-Crucially, **the taxable base is not simply each person's subtotal**: basic groceries are zero-rated / exempt. Each tax is distributed across *its own base*—the sum of assigned items subject to that specific tax. Someone who only bought milk and bread does not pay sales tax on someone else's beer or soap.
+Contrairement aux tickets français où les prix sont TTC, **les prix canadiens sont hors taxes**.
+TPS/GST, TVQ/PST ou TVH/HST s'ajoutent en pied de ticket.
 
-Each item line has `taxCodes`: `null` for "all receipt taxes apply", `[]` for tax-exempt, or a list of applicable tax codes (e.g. books in Quebec: GST applies, QST zero-rated at register). The vision model suggests tax codes, and a per-item checkbox allows manual corrections.
+Surtout, **la base taxable n'est pas le sous-total de chacun** : les aliments de base sont
+détaxés. Chaque taxe se répartit sur *sa propre base* — la somme des lignes attribuées qui y
+sont soumises. Qui n'a acheté que du lait et du pain ne paie pas la taxe sur la bière d'un autre.
 
-**The printed tax amount is authoritative.** The app never recomputes taxes from percentages; register rounding varies, and the physical receipt is the source of truth. Rates are stored only as hints.
+Chaque ligne porte un indicateur de taxation, proposé par le modèle et corrigeable par une case
+à cocher sur l'écran de vérification.
 
-### Tips
+**Le montant imprimé fait foi.** L'application ne recalcule jamais une taxe à partir d'un
+pourcentage : les arrondis de caisse varient, et c'est le papier qui a raison. Les taux ne sont
+conservés qu'à titre indicatif.
 
-Tips are not printed on the merchant receipt, so they do not enter the `subtotal + taxes = total` validation check, but they do enter the total split.
+### Pourboire
 
-Tips are configured on the Results screen: percentage presets, custom amounts, and calculation base (default: **pre-tax subtotal**, with an option for tax-inclusive). Tips are distributed pro-rata based on individual consumption via the largest remainder method.
+Le pourboire ne figure pas sur le ticket du commerçant : il n'entre donc pas dans le contrôle
+`sous-total + taxes = total`, mais bien dans le total réparti.
+
+Il se règle sur l'écran des résultats : pourcentages proposés, montant libre, et base de calcul
+(par défaut le **sous-total avant taxes**, avec une option taxes comprises). Il se répartit au
+prorata de la consommation de chacun, toujours par la méthode du plus fort reste.
 
 ---
 
-## Receipt Vision OCR
+## Lecture des tickets
 
-A vision model (Gemini) extracts structured JSON: line items, quantities, pre-tax prices, taxable indicators, bottom-of-receipt tax breakdown, merchant, date, subtotal, and total.
+L'appel au modèle de vision se fait **côté API**. Le navigateur n'a plus ni clé ni SDK Gemini :
+il envoie une photo, il reçoit un ticket structuré.
+
+Ce déplacement apporte une chose concrète : **le serveur écrit le résultat sur le ticket avant
+de répondre**. Si la connexion tombe pendant les quelques secondes du modèle, rouvrir le ticket
+montre la lecture. Le travail n'est plus perdu avec la requête.
 
 ```
-src/capture/image.ts       Image crop, rotation, compression
-src/extraction/gemini.ts   Model invocation, output schema, errors
-src/extraction/normalize.ts Output sanitization & validation (everything passes here)
-src/extraction/types.ts    Downstream consumption contract
+src/capture/image.ts   Recadrage, rotation, réduction — avant l'envoi
+app/extraction/        (côté API) Consigne, schéma, normalisation
 ```
 
-### Strict Guardrails
+### Garde-fous
 
-- **Amounts are requested as strings, not numbers**: The model outputs `"12.90"`, and `parseAmountToCents` parses it. No LLM float ever touches money.
-- **Strict normalization (`normalize.ts`)**: LLM outputs are plausible by design, hence unverified by default. Lines without readable amounts are discarded rather than coerced to zero, aberrant quantities default to 1, hallucinated dates become `null`, taxes without amounts are rejected, and `GST`/`TPS` are normalized to identical codes to prevent double-counting.
-- **Verification Screen**: The validation banner `subtotal + taxes = printed total` detects hallucinations immediately. The model also tags uncertain lines (`uncertain: true`), displaying visual indicators on those rows.
-
-### Latency Optimization
-
-- **Image downscaling before upload**: (≤ 1.6 Mpx, max width 1400 px) avoids uploading large 8 Mpx photos over mobile connections.
-- **Thinking budget disabled**: (`thinkingConfig.thinkingBudget: 0`) cuts inference latency.
-
----
-
-## Design System
-
-Minimalist tokens (`src/styles/tokens.css`): five shades of gray, amber reserved strictly for discrepancy alerts, and six desaturated hues for participant badges. No unnecessary validation greens or decorative gradients: **a correct state is signaled by the absence of alerts**. Tabular figures for all currency numbers.
+- **Le recadrage et la réduction restent dans le navigateur** (≤ 1,6 Mpx, 1400 px de large) :
+  c'est le seul moyen de n'envoyer qu'un ticket net et léger sur un réseau mobile.
+- **Les montants sont demandés en chaîne, jamais en nombre.** Le modèle écrit `"12,90"`, et
+  c'est l'analyseur qui décide ce que ça vaut. Aucun flottant produit par un LLM ne touche à de
+  l'argent.
+- **Normalisation stricte** : une ligne sans montant lisible est écartée et *nommée*, pas
+  ramenée à zéro ; une quantité aberrante retombe à 1 ; une date inventée devient nulle ; une
+  taxe sans montant est rejetée ; `GST` et `TPS` sont ramenés au même code pour éviter de
+  compter deux fois.
+- **Écran de vérification** : le bandeau `sous-total + taxes = total imprimé` révèle une
+  hallucination immédiatement. Les lignes que le modèle dit incertaines sont marquées.
 
 ---
 
-## Tricount Integration (Experimental)
+## Tricount
 
 > [!CAUTION]
-> Tricount (owned by bunq) **does not offer an official public API**. The module in `src/integrations/tricount/` communicates with an unofficial reverse-engineered Android client.
-> - Upstream endpoints can break at any time without notice.
-> - Usage falls outside official Terms of Service.
-> - Browser apps cannot call Tricount directly (CORS and signature restrictions), requiring a standalone relay service.
+> Tricount (bunq) **ne publie aucune interface programmable**. L'API passe par un client Android
+> rétro-conçu. Les points d'entrée peuvent cesser de fonctionner sans préavis, et cet usage sort
+> des conditions d'utilisation du service.
 
-The relay delegates the protocol to [`tricount-api`](https://github.com/elrandar/tricount-api). **No Tricount app API key is needed**: the client generates an Android device keypair on its first run and joins tricounts via their public share code.
+Un groupe **est** un tricount : il n'y a ni relais à configurer, ni jeton à coller, ni lien à
+ressaisir au moment d'envoyer. Il ne reste qu'une question — qui a payé.
 
-The relay runs as an independent service (see the companion project [`tricountApi`](https://github.com/Ziroles/tricountApi)), accessed via its URL and static bearer token.
+Les parts sont envoyées avec les **uuid** des membres. L'appariement par nom, qui échouait sur
+un accent ou une majuscule, n'existe plus.
 
-Participants are matched automatically: they share the same names as members in the Tricount.
+### Repli en texte, toujours fiable
 
-### Connecting to the Relay
-
-Configured in the in-app **Settings** screen and persisted locally in IndexedDB:
-
-| Setting | Description |
-|---|---|
-| **Relay URL** | Full URL (`https://...` or `http://localhost:8787`) or same-origin path (`/api/tricount`). |
-| **Relay Token** | 32-character secret key sent via `Authorization: Bearer ...`. |
-
-The feature is guarded by a compile-time build flag (`VITE_TRICOUNT_ENABLED`, defaults to `false`). See `.env.example`.
-
-### Plain Text Fallback (Always Reliable)
-
-The "Copy summary" button generates:
+Le bouton « Copier le récapitulatif » produit :
 
 ```
-Chez Victoire — 2026-03-14
-Subtotal: $50.00 · Taxes: $7.49
-Tip: $9.00
-Total: $66.49
+Chez Victoire — 14/03/2026
+Sous-total : 50,00 $ · taxes : 7,49 $
+Pourboire : 9,00 $
+Total : 66,49 $
 
-Mathieu: $39.89
-Lea: $26.60
+Mathieu : 39,89 $
+Léa : 26,60 $
 ```
 
-Individual amount copy buttons let you paste each person's exact share directly into Tricount or any payment app. Works offline and will never break.
+Un bouton de copie par personne permet de coller le montant exact dans Tricount ou n'importe
+quelle application de paiement. Fonctionne toujours, quoi qu'il arrive en amont.
 
 ---
 
-## Project Structure
+## Design
+
+Jetons minimalistes (`src/styles/tokens.css`) : cinq gris, l'ambre réservé aux alertes d'écart,
+et six teintes désaturées pour les badges de participants. Pas de vert de validation ni de
+dégradé décoratif : **un état correct se signale par l'absence d'alerte**. Chiffres tabulaires
+pour tous les montants.
+
+---
+
+## Structure
 
 ```
 src/
-  lib/          Financial math, split logic, taxes, tip, export
-  capture/      Camera, image cropping, rotation, compression
-  extraction/   Gemini model calls, validation, normalization schema
-  db/           IndexedDB schema (receipts, images, participants, settings)
-  store/        Zustand application state and debounced writes
-  ui/           UI primitives: screen, buttons, bottom sheets, badges, amount inputs
-  screens/      The six screens of the user journey
-  integrations/ Tricount integration (isolated & toggleable)
-  styles/       Design tokens and single CSS sheet
-docker/         nginx configuration for production container
+  api/          Client HTTP, et la traduction domaine ↔ API
+  lib/          Calcul financier, répartition, taxes, pourboire, export, journal
+  capture/      Recadrage, rotation, compression de l'image
+  db/           Cache IndexedDB, jeton d'appareil, préférences locales
+  store/        État Zustand, écriture différée, arbitrage des conflits
+  ui/           Primitives : écran, boutons, feuilles, badges, montants
+  screens/      Groupes, groupe, et les cinq étapes d'un ticket
+  integrations/ Envoi vers Tricount
+  styles/       Jetons et feuille unique
+tools/          Plugin Vite : les logs du navigateur vers le terminal
+docker/         Configuration nginx de production
 ```
 
 ---
 
-## License
+## Licence
 
-Open source project.
+Projet libre.

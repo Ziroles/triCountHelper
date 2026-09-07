@@ -17,9 +17,9 @@ export type PersonShareItem = {
   description?: string | null;
   totalCents: number;
   amountCents: number;
-  /** Nombre de personnes qui se partagent cette part (1 = seule). */
+  /** Number of people sharing this portion (1 = alone). */
   shareCount: number;
-  /** Vrai quand la ligne n'a été attribuée à personne et suit la répartition par défaut. */
+  /** True when the line was assigned to nobody and follows the default split. */
   auto: boolean;
 };
 
@@ -31,9 +31,9 @@ export type PersonTotals = {
   tipCents: number;
   totalCents: number;
   lineCount: number;
-  /** Lignes que la personne assume seule. */
+  /** Lines the person takes on alone. */
   soloLineCount: number;
-  /** Lignes partagées avec au moins une autre personne. */
+  /** Lines shared with at least one other person. */
   sharedLineCount: number;
   ratio: number;
   items: PersonShareItem[];
@@ -54,7 +54,7 @@ export type Settlement = {
   assignedSubtotalCents: number;
   unassignedLinesCents: number;
   unassignedLineIds: string[];
-  /** Lignes sans attribution explicite, réparties d'office entre tous les participants. */
+  /** Lines with no explicit assignment, split automatically between all participants. */
   autoSplitLineIds: string[];
   autoSplitLinesCents: number;
   taxes: TaxBreakdown[];
@@ -138,8 +138,8 @@ export function settle(input: SettleInput, people: readonly Person[]): Settlemen
   let assignedSubtotalCents = 0;
   let autoSplitLinesCents = 0;
 
-  /* Une ligne que personne n'a réclamée revient à tout le monde, à parts égales.
-     Sans participant, il n'y a personne à qui la donner : elle reste hors répartition. */
+  /* A line nobody claimed goes to everyone, in equal shares. With no
+     participants there is nobody to give it to: it stays out of the split. */
   const everyone: Assignment[] = people.map((person) => ({ personId: person.id, shares: 1 }));
 
   for (const line of input.lines) {
