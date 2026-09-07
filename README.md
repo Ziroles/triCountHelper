@@ -66,7 +66,7 @@ L'intégration continue (`.github/workflows/ci.yml`) lance typage, tests et buil
 poussée et chaque demande de tirage.
 
 Le `dist/` produit fait environ 255 Kio : des fichiers statiques. N'importe quel hébergeur
-convient, à condition de mandater `/api` vers l'API — voir `docker/nginx.conf`.
+convient, à condition de mandater `/api` vers l'API — voir `docker/templates/default.conf.template`.
 
 ---
 
@@ -114,9 +114,23 @@ Le canal tient en deux fichiers : `tools/vite-plugin-dev-log.ts` côté serveur,
 
 ## Docker
 
+L'application et l'API sont deux conteneurs sur un même réseau Docker nommé
+`splitticket` : c'est ce réseau qui permet à nginx de résoudre le nom de l'API. Levez
+l'API d'abord — c'est son `docker-compose.yml` qui crée le réseau :
+
+```bash
+cd ../tricountApi && docker compose up -d   # crée le réseau « splitticket »
+cd ../triCountHelper && docker compose up -d --build
+```
+
+L'application écoute alors sur le port 8080 (`SPLITTICKET_PORT` pour en changer).
+
+Sans Compose, il faut raccorder le conteneur au réseau à la main — l'oublier donne
+`host not found in upstream` au démarrage de nginx :
+
 ```bash
 docker build -t splitticket .
-docker run -d -p 8080:80 splitticket
+docker run -d --name splitticket --network splitticket -p 8080:80 splitticket
 ```
 
 Deux arguments de build, tous deux **publics** puisqu'ils sont intégrés au paquet livré :
@@ -129,10 +143,19 @@ Deux arguments de build, tous deux **publics** puisqu'ils sont intégrés au paq
 **N'y placez jamais de secret** : ni clé Gemini, ni mot de passe. La clé Gemini vit côté API,
 chiffrée ; le jeton d'appareil est délivré par l'API et n'existe pas dans le build.
 
-`docker/nginx.conf` sert l'application à la racine et mandate `/api/` vers le conteneur
-`splitticket-api` — l'API se retrouve ainsi sur la même origine, ce qui supprime toute question
-de CORS. Le conteneur écoute en HTTP ; terminez le TLS sur votre reverse proxy (indispensable
-pour l'installation PWA et le service worker).
+Une variable d'environnement, lue au **démarrage** du conteneur :
+
+| Variable | Effet |
+|---|---|
+| `SPLITTICKET_API` | Hôte et port de l'API derrière `/api/`. Défaut : `tricount-api:8787`, le nom du conteneur de l'API. |
+
+`docker/templates/default.conf.template` sert l'application à la racine et mandate `/api/`
+vers ce conteneur — l'API se retrouve ainsi sur la même origine, ce qui supprime toute
+question de CORS. Le nom est résolu **à chaque requête** plutôt qu'une fois pour toutes :
+nginx démarre donc même si l'API n'est pas encore levée (elle répond 502 tant qu'elle
+manque, au lieu de faire échouer le démarrage), et il la suit quand Docker lui donne une
+nouvelle adresse. Le conteneur écoute en HTTP ; terminez le TLS sur votre reverse proxy
+(indispensable pour l'installation PWA et le service worker).
 
 ---
 

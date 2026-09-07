@@ -1,3 +1,10 @@
+# Le nom de l'API est résolu à chaque requête, et non une seule fois au
+# démarrage : nginx démarre donc même si l'API n'est pas encore levée, et il
+# la retrouve quand Docker lui attribue une nouvelle adresse. Avec un nom
+# écrit en dur dans `proxy_pass`, nginx refuse de démarrer — c'est
+# l'erreur « host not found in upstream ».
+resolver ${SPLITTICKET_RESOLVER} valid=10s ipv6=off;
+
 server {
     listen 80;
     server_name _;
@@ -11,7 +18,14 @@ server {
     # The API on the same origin as the application: no CORS to configure, and
     # the device token never crosses an origin boundary.
     location /api/ {
-        proxy_pass http://splitticket-api:8787/;
+        set $upstream_api ${SPLITTICKET_API};
+
+        # `proxy_pass` avec une variable ne retire pas le préfixe de la
+        # `location` : on le retire nous-mêmes, comme le faisait la barre
+        # oblique finale de `proxy_pass http://…:8787/`.
+        rewrite ^/api/(.*)$ /$1 break;
+
+        proxy_pass http://$upstream_api;
         proxy_set_header Host $host;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;

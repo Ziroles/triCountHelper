@@ -1,0 +1,23 @@
+services:
+  splitticket:
+    build:
+      context: .
+      args:
+        # Publics : intégrés au paquet livré. Jamais de secret ici.
+        VITE_API_URL: ${VITE_API_URL:-/api}
+        VITE_SIGNUP_KEY: ${VITE_SIGNUP_KEY:-}
+    container_name: splitticket
+    restart: unless-stopped
+    ports:
+      - "${SPLITTICKET_PORT:-8080}:80"
+    environment:
+      # Le conteneur de l'API, sur le réseau « splitticket ».
+      - SPLITTICKET_API=${SPLITTICKET_API:-tricount-api:8787}
+    networks:
+      - splitticket
+
+networks:
+  # Créé par le compose de l'API (projet tricountApi) : lancez-le d'abord.
+  splitticket:
+    name: splitticket
+    external: true
