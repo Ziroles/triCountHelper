@@ -62,7 +62,9 @@ const DEV_LOG_EVENT = 'splitticket:log';
 
 // ── Masking ─────────────────────────────────────────────────────────────────
 
-const SECRET_KEY = /token|authorization|password|secret|api_?key|signup/i;
+/* `api[-_]?key` and not `api_?key`: the header carrying a Gemini key is
+   `x-goog-api-key`, with hyphens, and the underscore-only form let it through. */
+const SECRET_KEY = /token|authorization|password|secret|api[-_]?key|signup|proof|\bkek\b/i;
 /** A bearer token or a Gemini key spotted inside free-form text. */
 const SECRET_TEXT = /\b(Bearer\s+\S+|AIza[0-9A-Za-z_-]{10,})/g;
 

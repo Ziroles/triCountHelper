@@ -6,6 +6,7 @@ import { useAppStore } from '../store/useAppStore';
 import { clearCache, estimateStorage, forgetEverything } from '../db';
 import * as api from '../api';
 import { TAX_REGIMES, type TipBasis } from '../types';
+import { hint } from '../lib/crypto';
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} o`;
@@ -25,6 +26,7 @@ export function SettingsScreen() {
   const navigate = useAppStore((s) => s.navigate);
   const settings = useAppStore((s) => s.settings);
   const server = useAppStore((s) => s.server);
+  const geminiKey = useAppStore((s) => s.geminiKey);
   const accountEmail = useAppStore((s) => s.accountEmail);
   const online = useAppStore((s) => s.online);
   const updateSettings = useAppStore((s) => s.updateSettings);
@@ -49,24 +51,34 @@ export function SettingsScreen() {
   useEffect(refreshStorage, []);
 
   const saveKey = async (value: string) => {
-    setKeyStatus('Enregistrement…');
+    setKeyStatus('Chiffrement…');
     try {
-      await updateServerSettings({ geminiApiKey: value });
+      await updateServerSettings({ geminiKey: value });
       setKeyDraft('');
-      setKeyStatus(value === '' ? 'Clé effacée.' : 'Clé enregistrée.');
+      setKeyStatus(value === '' ? 'Clé effacée.' : 'Clé chiffrée et enregistrée.');
     } catch (error) {
+      if (error instanceof Error && error.message === 'account_required') {
+        setKeyStatus('Créez un compte ci-dessous pour enregistrer votre clé.');
+        return;
+      }
       setKeyStatus(error instanceof Error ? error.message : 'Échec.');
     }
   };
 
-  const noKeyAnywhere = !server.hasGeminiKey && !server.serverHasGeminiKey;
+  const hasOwnKey = geminiKey !== null;
+  /* A blob we hold but cannot open: the password changed on another device.
+     Nothing is recoverable, and saying so is more useful than an empty field. */
+  const keyLocked = geminiKey === null && server.geminiKeyBlob !== null;
+  const noKeyAnywhere = !hasOwnKey && !server.serverHasGeminiKey;
 
   return (
     <Screen title="Réglages" onBack={() => navigate({ name: 'groups' })}>
       <section className="section">
         <h2>Lecture des tickets</h2>
         <p className="muted">
-          Les tickets sont lus par un modèle Gemini, appelé par le serveur.{' '}
+          Les tickets sont lus par un modèle Gemini. Avec votre propre clé, l’appel part{' '}
+          <strong>directement de cet appareil</strong> vers Google :{' '}
+          <strong>votre clé ne passe jamais par le serveur SplitTicket</strong>.{' '}
           <strong>La photo est envoyée à Google</strong> pour cette seule opération.
         </p>
 
@@ -76,10 +88,16 @@ export function SettingsScreen() {
             vôtre ci-dessous pour lire des tickets en photo. Sans clé, la saisie à la main
             fonctionne normalement.
           </p>
-        ) : server.hasGeminiKey ? (
+        ) : keyLocked ? (
+          <p className="warnText">
+            Une clé est enregistrée, mais cet appareil ne peut plus l’ouvrir — le mot de passe
+            du compte a changé depuis. Elle est définitivement illisible, y compris pour le
+            serveur : ressaisissez-la ci-dessous.
+          </p>
+        ) : hasOwnKey ? (
           <p className="muted">
-            Votre clé <span className="num">{server.geminiKeyHint}</span> est enregistrée, et
-            elle est utilisée en priorité.
+            Votre clé <span className="num">{hint(geminiKey)}</span> est enregistrée, et elle
+            est utilisée en priorité.
           </p>
         ) : (
           <p className="muted">
@@ -91,7 +109,11 @@ export function SettingsScreen() {
         <label className="field">
           <span className="field__label">
             Votre clé API
-            <span className="muted"> — conservée chiffrée par le serveur</span>
+            <span className="muted">
+              {' '}
+              — chiffrée sur cet appareil avant d’être envoyée. Le serveur la conserve sans
+              pouvoir la lire : un mot de passe oublié la perd définitivement.
+            </span>
           </span>
           <div className="row row--gap">
             <input
@@ -99,7 +121,7 @@ export function SettingsScreen() {
               className="grow"
               autoComplete="off"
               spellCheck={false}
-              placeholder={server.hasGeminiKey ? '••••••••' : 'AIza…'}
+              placeholder={hasOwnKey ? '••••••••' : 'AIza…'}
               value={keyDraft}
               onChange={(event) => setKeyDraft(event.target.value)}
             />
@@ -111,7 +133,7 @@ export function SettingsScreen() {
             </Button>
           </div>
         </label>
-        {server.hasGeminiKey ? (
+        {hasOwnKey || keyLocked ? (
           <Button variant="quiet" disabled={!online} onClick={() => void saveKey('')}>
             Effacer ma clé
           </Button>

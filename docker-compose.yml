@@ -1,12 +1,17 @@
+# Le front est un service autonome : il ne sert que des fichiers statiques et ne
+# relaie rien. Il ne connaît l'API que par VITE_API_URL, intégrée au paquet au
+# moment du build — aucun réseau, volume ni conteneur en commun avec elle.
 services:
   splitticket:
     build:
       context: .
       args:
         # Publics : intégrés au paquet livré. Jamais de secret ici.
-        VITE_API_URL: ${VITE_API_URL:-}
+        # URL publique de l'API, obligatoire : sans elle le paquet appellerait
+        # « /api », que cette image ne sert pas.
+        VITE_API_URL: ${VITE_API_URL:?set VITE_API_URL to the API public URL, e.g. https://api.example.com}
         VITE_SIGNUP_KEY: ${VITE_SIGNUP_KEY:-}
     container_name: splitticket
     restart: unless-stopped
     ports:
-      - "${SPLITTICKET_PORT:-8080}:80"
+      - "${SPLITTICKET_WEB_PORT:-8080}:80"

@@ -7,6 +7,8 @@
  */
 
 import { API_BASE, request, requestBlob } from './client';
+import { derive, newSalt } from '../lib/crypto';
+import { setKek } from '../db';
 import { fromWire, toWire, type WireReceipt } from './wire';
 import type {
   Group,
@@ -25,7 +27,6 @@ export type Health = {
   contractVersion: string;
   serverHasGeminiKey: boolean;
   signupKeyRequired: boolean;
-  canStoreUserKeys: boolean;
   imageRetentionDays: number;
 };
 
@@ -47,18 +48,49 @@ export type Me = {
 export const me = (): Promise<Me> => request<Me>('/v1/me');
 
 export const updateServerSettings = (
-  patch: { geminiApiKey?: string; geminiModel?: string },
+  patch: { geminiKeyBlob?: string; geminiModel?: string },
 ): Promise<ServerSettings> =>
   request<ServerSettings>('/v1/me/settings', { method: 'PUT', body: patch });
 
+/** Models readable with the *instance* key. A personal key asks Google itself. */
 export const listModels = (): Promise<{ name: string; displayName: string }[]> =>
   request('/v1/models', { timeoutMs: 20000 });
 
-export const createAccount = (email: string, password: string): Promise<Me> =>
-  request<Me>('/v1/accounts', { method: 'POST', body: { email, password } });
+/**
+ * The password never leaves this function.
+ *
+ * It is turned into two independent values: a `proof` the API can authenticate
+ * against, and a KEK that unlocks the Gemini key and stays here. Doing the
+ * derivation at this seam — rather than in the screens — is what makes it
+ * impossible to send a password by accident: no caller ever holds one for long
+ * enough to pass it on.
+ *
+ * The KEK is kept non-extractable in the local database, so reopening the app
+ * unlocks the key without asking again. It can be used, never read back.
+ */
+export async function createAccount(email: string, password: string): Promise<Me> {
+  const kdfSalt = newSalt();
+  const { proof, kek } = await derive(password, kdfSalt);
+  const me = await request<Me>('/v1/accounts', {
+    method: 'POST',
+    body: { email, proof, kdfSalt },
+  });
+  await setKek(kek);
+  return me;
+}
 
-export const openSession = (email: string, password: string): Promise<Me> =>
-  request<Me>('/v1/sessions', { method: 'POST', body: { email, password } });
+export async function openSession(email: string, password: string): Promise<Me> {
+  // The salt first: without it there is nothing to derive from. An unknown
+  // address gets a decoy, so this call says nothing about who has an account.
+  const { kdfSalt } = await request<{ kdfSalt: string }>('/v1/accounts/salt', {
+    method: 'POST',
+    body: { email },
+  });
+  const { proof, kek } = await derive(password, kdfSalt);
+  const me = await request<Me>('/v1/sessions', { method: 'POST', body: { email, proof } });
+  await setKek(kek);
+  return me;
+}
 
 // ── Groups ───────────────────────────────────────────────────────────────────
 
@@ -119,6 +151,22 @@ export async function uploadImage(receiptId: string, blob: Blob): Promise<Receip
 
 export const readImage = (receiptId: string): Promise<Blob | null> =>
   requestBlob(`/v1/receipts/${encodeURIComponent(receiptId)}/image`);
+
+/**
+ * Result of a reading this browser performed itself, with the user's own key.
+ *
+ * We send the model's raw answer and let the API sanitise it: the amount
+ * parsing and the Canadian tax rules are tested over there, and a second
+ * implementation here is how two of them start disagreeing. The API writes the
+ * result onto the receipt, so a connection dropping now loses nothing.
+ */
+export async function submitExtraction(receiptId: string, rawText: string): Promise<Receipt> {
+  const wire = await request<WireReceipt>(
+    `/v1/receipts/${encodeURIComponent(receiptId)}/extraction`,
+    { method: 'POST', body: { rawText }, timeoutMs: 30000 },
+  );
+  return fromWire(wire);
+}
 
 /**
  * Starts the OCR pass. The server writes the result onto the receipt before

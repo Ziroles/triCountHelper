@@ -175,17 +175,21 @@ export const DEFAULT_SETTINGS: Settings = {
   theme: 'system',
 };
 
-/** Settings held by the API on this user's behalf. */
+/**
+ * Settings held by the API on this user's behalf.
+ *
+ * `geminiKeyBlob` is the user's Gemini key, sealed in this browser with a key
+ * derived from their password. The API stores it and cannot read it; opening it
+ * is `lib/crypto.ts`'s job, and the plaintext lives in memory only.
+ */
 export type ServerSettings = {
-  hasGeminiKey: boolean;
-  geminiKeyHint: string | null;
+  geminiKeyBlob: string | null;
   serverHasGeminiKey: boolean;
   geminiModel: string;
 };
 
 export const DEFAULT_SERVER_SETTINGS: ServerSettings = {
-  hasGeminiKey: false,
-  geminiKeyHint: null,
+  geminiKeyBlob: null,
   serverHasGeminiKey: false,
   geminiModel: '',
 };

@@ -99,6 +99,19 @@ async function writeDevice(key: string, value: unknown): Promise<void> {
 export const getDeviceToken = (): Promise<string | null> => readDevice('token', null);
 export const setDeviceToken = (token: string): Promise<void> => writeDevice('token', token);
 
+/**
+ * The key that opens the user's Gemini key, kept so that reopening the app does
+ * not ask for a password again.
+ *
+ * Stored as a `CryptoKey`, which IndexedDB knows how to hold natively — and
+ * which was derived **non-extractable**. Anything that reads this store gets
+ * an object it can decrypt with, never the key material itself. That is worth
+ * more than any amount of encoding on our part.
+ */
+export const getKek = (): Promise<CryptoKey | null> => readDevice('kek', null);
+export const setKek = (kek: CryptoKey): Promise<void> => writeDevice('kek', kek);
+export const clearKek = (): Promise<void> => writeDevice('kek', null);
+
 export async function getSettings(): Promise<Settings> {
   const stored = await readDevice<Partial<Settings>>('settings', {});
   return { ...DEFAULT_SETTINGS, ...stored };

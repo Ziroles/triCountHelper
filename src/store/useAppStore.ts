@@ -23,6 +23,7 @@ import { create } from 'zustand';
 import * as api from '../api';
 import { ApiError, OfflineError } from '../api';
 import * as db from '../db';
+import { open as openSealed, seal } from '../lib/crypto';
 import { logger } from '../lib/log';
 import { colorForIndex } from '../lib/people';
 import { currentRoute, routeToPath } from '../lib/routing';
@@ -55,6 +56,13 @@ type State = {
 
   settings: Settings;
   server: ServerSettings;
+  /**
+   * The user's Gemini key, opened from `server.geminiKeyBlob`. In memory only:
+   * it is never written anywhere, and the API has never seen it. Null means
+   * either "none saved" or "the local key cannot open the blob any more",
+   * which the settings screen tells apart.
+   */
+  geminiKey: string | null;
   accountEmail: string | null;
 
   groups: GroupSummary[];
@@ -99,7 +107,8 @@ type Actions = {
 
   updateSettings: (patch: Partial<Settings>) => Promise<void>;
   updateServerSettings: (patch: {
-    geminiApiKey?: string;
+    /** In the clear here, sealed before it leaves. "" clears the stored key. */
+    geminiKey?: string;
     geminiModel?: string;
   }) => Promise<void>;
   refreshMe: () => Promise<void>;
@@ -112,6 +121,19 @@ export type AppStore = State & Actions;
  * times in a single process and need `init` to start over from scratch.
  */
 export let resetForTests: () => void = () => undefined;
+
+/**
+ * Blob → Gemini key, with the locally kept KEK.
+ *
+ * Every failure lands on the same answer, null: no blob, no KEK yet, or a
+ * password changed elsewhere. The screen shows one state — "no key here" — and
+ * offers to enter it again, which is the only thing to do in all three cases.
+ */
+async function openStoredKey(blob: string | null): Promise<string | null> {
+  if (blob === null) return null;
+  const kek = await db.getKek();
+  return kek === null ? null : openSealed(kek, blob);
+}
 
 /** A group's participants, in the shape `lib/compute.ts` expects. */
 export function peopleOf(group: Group | null): Person[] {
@@ -246,6 +268,7 @@ export const useAppStore = create<AppStore>((set, get) => {
 
     settings: DEFAULT_SETTINGS,
     server: DEFAULT_SERVER_SETTINGS,
+    geminiKey: null,
     accountEmail: null,
 
     groups: [],
@@ -533,10 +556,33 @@ export const useAppStore = create<AppStore>((set, get) => {
     },
 
     async updateServerSettings(patch) {
-      // The values themselves stay in: one of them is a Gemini key.
+      // The field names, never the values: one of them is a Gemini key.
       log.info('server settings changed', { fields: Object.keys(patch) });
-      const server = await api.updateServerSettings(patch);
-      set({ server });
+
+      const wire: { geminiKeyBlob?: string; geminiModel?: string } = {};
+      if (patch.geminiModel !== undefined) wire.geminiModel = patch.geminiModel;
+
+      let geminiKey = get().geminiKey;
+      if (patch.geminiKey !== undefined) {
+        const key = patch.geminiKey.trim();
+        if (key === '') {
+          wire.geminiKeyBlob = '';
+          geminiKey = null;
+        } else {
+          const kek = await db.getKek();
+          if (kek === null) {
+            // No account, or a session never opened on this device: there is
+            // nothing to seal with, and storing an unopenable blob would be
+            // worse than refusing.
+            throw new Error('account_required');
+          }
+          wire.geminiKeyBlob = await seal(kek, key);
+          geminiKey = key;
+        }
+      }
+
+      const server = await api.updateServerSettings(wire);
+      set({ server, geminiKey });
     },
 
     async refreshMe() {
@@ -545,10 +591,14 @@ export const useAppStore = create<AppStore>((set, get) => {
         log.debug('identity and server settings', {
           device: me.deviceId,
           account: me.accountEmail !== null,
-          geminiKey: me.settings.hasGeminiKey,
+          geminiKey: me.settings.geminiKeyBlob !== null,
           model: me.settings.geminiModel,
         });
-        set({ server: me.settings, accountEmail: me.accountEmail });
+        set({
+          server: me.settings,
+          geminiKey: await openStoredKey(me.settings.geminiKeyBlob),
+          accountEmail: me.accountEmail,
+        });
       } catch (error) {
         log.debug('server settings unavailable, keeping the previous ones', error);
         // With no network we keep what we knew: server settings do not block
