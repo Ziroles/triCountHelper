@@ -98,6 +98,7 @@ async function writeDevice(key: string, value: unknown): Promise<void> {
 
 export const getDeviceToken = (): Promise<string | null> => readDevice('token', null);
 export const setDeviceToken = (token: string): Promise<void> => writeDevice('token', token);
+export const clearDeviceToken = (): Promise<void> => writeDevice('token', null);
 
 /**
  * The key that opens the user's Gemini key, kept so that reopening the app does

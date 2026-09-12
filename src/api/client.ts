@@ -10,7 +10,7 @@
  * "identity per device" model.
  */
 
-import { getDeviceToken, setDeviceToken } from '../db';
+import { clearDeviceToken, getDeviceToken, setDeviceToken } from '../db';
 import { logger } from '../lib/log';
 
 const log = logger('api');
@@ -122,6 +122,32 @@ export async function deviceToken(): Promise<string> {
   return enrolling;
 }
 
+/**
+ * A 401 `unauthenticated` answering a token we did send means the server no
+ * longer knows this device: its database was reset, or the device removed. That
+ * token will never work again, and showing the error helps nobody — the user has
+ * nothing to act on. So: forget it, enrol again, replay the request once.
+ *
+ * The other 401s (`bad_credentials`, `signup_key_invalid`) are answers to show,
+ * not a stale identity, and go through untouched.
+ */
+async function isStaleToken(response: Response): Promise<boolean> {
+  if (response.status !== 401) return false;
+  const detail = readDetail(await response.clone().json().catch(() => null));
+  return detail.code === 'unauthenticated';
+}
+
+async function renewToken(stale: string): Promise<string> {
+  // Several requests can run into the same dead token together. Only a stored
+  // token still equal to it is cleared: the others then find the fresh one, or
+  // join the enrolment already under way.
+  if ((await getDeviceToken()) === stale) {
+    log.warn('device unknown to the server, enrolling it again');
+    await clearDeviceToken();
+  }
+  return deviceToken();
+}
+
 type RequestOptions = {
   method?: string;
   body?: unknown;
@@ -140,52 +166,60 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
     throw new OfflineError();
   }
 
-  const token = await deviceToken();
-  const headers: Record<string, string> = { authorization: `Bearer ${token}` };
+  // Built once: a JSON string and a FormData can both be sent a second time.
   let body: BodyInit | undefined;
+  let contentType: string | undefined;
   if (options.form) {
     body = options.form;
   } else if (options.body !== undefined) {
-    headers['content-type'] = 'application/json';
+    contentType = 'application/json';
     body = JSON.stringify(options.body);
   }
 
-  // An internal abort must not cancel the abort the caller asked for: we listen
-  // to theirs, we trigger ours.
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? 30000);
-  options.signal?.addEventListener('abort', () => controller.abort(), { once: true });
+  const send = async (token: string): Promise<Response> => {
+    const headers: Record<string, string> = { authorization: `Bearer ${token}` };
+    if (contentType) headers['content-type'] = contentType;
 
-  let response: Response;
-  try {
-    response = await fetch(`${API_BASE}${path}`, {
-      method: options.method ?? 'GET',
-      headers,
-      ...(body === undefined ? {} : { body }),
-      signal: controller.signal,
-    });
-  } catch (error) {
-    if (options.signal?.aborted) {
-      done('aborted by caller');
-      throw error;
+    // An internal abort must not cancel the abort the caller asked for: we listen
+    // to theirs, we trigger ours.
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? 30000);
+    options.signal?.addEventListener('abort', () => controller.abort(), { once: true });
+
+    try {
+      return await fetch(`${API_BASE}${path}`, {
+        method,
+        headers,
+        ...(body === undefined ? {} : { body }),
+        signal: controller.signal,
+      });
+    } catch (error) {
+      if (options.signal?.aborted) {
+        done('aborted by caller');
+        throw error;
+      }
+      const timedOut = controller.signal.aborted;
+      log.error(`${method} ${path} — ${timedOut ? 'timed out' : 'server unreachable'}`, {
+        base: API_BASE,
+        timeoutMs: options.timeoutMs ?? 30000,
+        cause: error,
+      });
+      throw new ApiError(
+        timedOut
+          ? 'Le serveur a mis trop de temps à répondre.'
+          : 'Le serveur n’a pas pu être joint. Vérifiez la connexion.',
+        0,
+        timedOut ? 'timeout' : 'network',
+        true,
+      );
+    } finally {
+      clearTimeout(timer);
     }
-    const timedOut = controller.signal.aborted;
-    log.error(`${method} ${path} — ${timedOut ? 'timed out' : 'server unreachable'}`, {
-      base: API_BASE,
-      timeoutMs: options.timeoutMs ?? 30000,
-      cause: error,
-    });
-    throw new ApiError(
-      timedOut
-        ? 'Le serveur a mis trop de temps à répondre.'
-        : 'Le serveur n’a pas pu être joint. Vérifiez la connexion.',
-      0,
-      timedOut ? 'timeout' : 'network',
-      true,
-    );
-  } finally {
-    clearTimeout(timer);
-  }
+  };
+
+  const token = await deviceToken();
+  let response = await send(token);
+  if (await isStaleToken(response)) response = await send(await renewToken(token));
 
   if (response.status === 204) {
     done('204');
@@ -221,10 +255,11 @@ export async function requestBlob(path: string): Promise<Blob | null> {
     return null;
   }
   const done = log.time(`GET ${path} (blob)`);
+  const send = (token: string) =>
+    fetch(`${API_BASE}${path}`, { headers: { authorization: `Bearer ${token}` } });
   const token = await deviceToken();
-  const response = await fetch(`${API_BASE}${path}`, {
-    headers: { authorization: `Bearer ${token}` },
-  });
+  let response = await send(token);
+  if (await isStaleToken(response)) response = await send(await renewToken(token));
   if (!response.ok) {
     log.warn(`GET ${path} → ${response.status}, no blob`);
     return null;
