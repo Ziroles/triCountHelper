@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach, vi } from 'vitest';
-import { renderHook } from '@testing-library/react';
+import { act, renderHook } from '@testing-library/react';
 
 vi.mock('../api', () => import('../test/fakeApi'));
 
@@ -47,7 +47,7 @@ describe('participants du groupe', () => {
   it('en rend un nouveau quand le groupe change', () => {
     const { result, rerender } = renderHook(() => useGroupPeople());
     const first = result.current;
-    useAppStore.setState({ group: { ...group, title: 'Voyage' } });
+    act(() => useAppStore.setState({ group: { ...group, title: 'Voyage' } }));
     rerender();
     expect(result.current).not.toBe(first);
   });
