@@ -3,11 +3,38 @@ import { Screen } from '../ui/Screen';
 import { Button } from '../ui/Button';
 import * as api from '../api';
 import { ApiError } from '../api';
+import { GeminiError, readReceipt } from '../lib/gemini';
 import { logger } from '../lib/log';
 import { useAppStore } from '../store/useAppStore';
 import type { Receipt } from '../types';
 
 const log = logger('scan');
+
+/**
+ * Reading done here, with the user's own key.
+ *
+ * The photo comes back down from the API — it is already there, and the
+ * alternative would be keeping a second copy in the browser just in case.
+ */
+async function readHere(receiptId: string, apiKey: string, model: string): Promise<Receipt> {
+  const blob = await api.readImage(receiptId);
+  if (blob === null) {
+    throw new ApiError('La photo de ce ticket n’est plus disponible.', 404, 'image_missing', false);
+  }
+  const base64 = await toBase64(blob);
+  const raw = await readReceipt(apiKey, model, base64, blob.type || 'image/jpeg');
+  return api.submitExtraction(receiptId, raw);
+}
+
+/** Blob → base64 without the `data:` prefix, which is what Gemini expects. */
+function toBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('photo illisible'));
+    reader.onload = () => resolve(String(reader.result).split(',')[1] ?? '');
+    reader.readAsDataURL(blob);
+  });
+}
 
 type ProcessingScreenProps = {
   receipt: Receipt;
@@ -20,17 +47,23 @@ type Phase =
   | { kind: 'error'; message: string; retryable: boolean; missingKey: boolean };
 
 /**
- * Reading of the receipt by the vision model, run by the API.
+ * Reading of the receipt by the vision model.
  *
- * The server **writes the result onto the receipt** before answering. In
- * practice: if the screen is closed or the connection drops during the model's
- * few seconds, the reading is not lost — reopening the receipt shows it. That
- * is what the previous version, which called Gemini from the browser, could not
- * offer.
+ * Two paths, and which one runs depends on whose key pays for it:
+ *
+ *   own key  → this browser calls Google, and posts the raw answer to the API.
+ *              The key never touches the SplitTicket server.
+ *   no key   → the API calls Google with the instance's own key.
+ *
+ * Either way the **API writes the result onto the receipt** before answering:
+ * if the screen is closed or the connection drops during the model's few
+ * seconds, the reading is not lost — reopening the receipt shows it.
  */
 export function ProcessingScreen({ receipt, onBack, onDone }: ProcessingScreenProps) {
   const updateReceipt = useAppStore((s) => s.updateReceipt);
   const navigate = useAppStore((s) => s.navigate);
+  const geminiKey = useAppStore((s) => s.geminiKey);
+  const model = useAppStore((s) => s.server.geminiModel);
   const [phase, setPhase] = useState<Phase>({ kind: 'working' });
   const started = useRef(false);
 
@@ -46,9 +79,11 @@ export function ProcessingScreen({ receipt, onBack, onDone }: ProcessingScreenPr
        something else; and the number of lines read says straight away whether
        the result is worth anything, without opening the next screen. */
     const done = log.time(`reading receipt ${receipt.id}`);
-    log.info('reading requested from the server', { receipt: receipt.id });
+    log.info('reading requested', { receipt: receipt.id, ownKey: geminiKey !== null });
     try {
-      const scanned = await api.scanReceipt(receipt.id);
+      const scanned = geminiKey === null
+        ? await api.scanReceipt(receipt.id)
+        : await readHere(receipt.id, geminiKey, model);
       done(
         `${scanned.lines.length} lines, ${scanned.taxes.length} taxes, ` +
           `stated total ${scanned.statedTotalCents ?? '—'}`,
@@ -61,11 +96,12 @@ export function ProcessingScreen({ receipt, onBack, onDone }: ProcessingScreenPr
       setPhase({
         kind: 'error',
         message: error instanceof Error ? error.message : "La lecture n'a pas abouti.",
-        retryable: error instanceof ApiError ? error.retryable : true,
+        retryable:
+          error instanceof ApiError || error instanceof GeminiError ? error.retryable : true,
         missingKey,
       });
     }
-  }, [receipt.id, updateReceipt, onDone]);
+  }, [receipt.id, geminiKey, model, updateReceipt, onDone]);
 
   useEffect(() => {
     if (started.current) return;

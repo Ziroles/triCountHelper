@@ -47,8 +47,7 @@ export const state: FakeState = {
   receipts: new Map(),
   images: new Map(),
   settings: {
-    hasGeminiKey: false,
-    geminiKeyHint: null,
+    geminiKeyBlob: null,
     serverHasGeminiKey: true,
     geminiModel: 'gemini-2.5-flash',
   },
@@ -65,8 +64,7 @@ export function reset(): void {
   state.receipts = new Map();
   state.images = new Map();
   state.settings = {
-    hasGeminiKey: false,
-    geminiKeyHint: null,
+    geminiKeyBlob: null,
     serverHasGeminiKey: true,
     geminiModel: 'gemini-2.5-flash',
   };
@@ -165,7 +163,6 @@ export async function health() {
     contractVersion: state.contractVersion,
     serverHasGeminiKey: state.settings.serverHasGeminiKey,
     signupKeyRequired: false,
-    canStoreUserKeys: true,
     imageRetentionDays: 90,
   };
 }
@@ -180,17 +177,13 @@ export async function me() {
 }
 
 export async function updateServerSettings(patch: {
-  geminiApiKey?: string;
+  geminiKeyBlob?: string;
   geminiModel?: string;
 }): Promise<ServerSettings> {
   guard();
-  if (patch.geminiApiKey !== undefined) {
-    const key = patch.geminiApiKey.trim();
-    state.settings = {
-      ...state.settings,
-      hasGeminiKey: key !== '',
-      geminiKeyHint: key === '' ? null : `${key.slice(0, 4)}…${key.slice(-3)}`,
-    };
+  if (patch.geminiKeyBlob !== undefined) {
+    // Opaque here as it is on the real server: stored as received, or cleared.
+    state.settings = { ...state.settings, geminiKeyBlob: patch.geminiKeyBlob || null };
   }
   if (patch.geminiModel !== undefined) {
     state.settings = { ...state.settings, geminiModel: patch.geminiModel };

@@ -115,29 +115,36 @@ Le canal tient en deux fichiers : `tools/vite-plugin-dev-log.ts` côté serveur,
 ## Docker
  
 L'image Docker sert l'application statique via Nginx. Un reverse proxy en amont (comme Traefik) termine le TLS et achemine le trafic vers ce conteneur.
- 
+
+**Le front et l'API sont deux services indépendants.** Cette image ne relaie rien : elle sert
+la PWA, un point c'est tout. L'API se déploie de son côté (dépôt `tricountApi`), avec son
+propre Compose, sans réseau ni volume partagé. Le seul lien est l'URL publique de l'API,
+intégrée au paquet au moment du build — et, en face, l'origine du front déclarée dans
+`SPLITTICKET_ALLOWED_ORIGINS` côté API pour que CORS laisse passer les appels.
+
 ```bash
-docker compose up -d --build
+VITE_API_URL=https://api.mondomaine.com docker compose up -d --build
 ```
- 
-L'application écoute alors sur le port 8080 (`SPLITTICKET_PORT` pour en changer).
- 
+
+L'application écoute alors sur le port 8080 (`SPLITTICKET_WEB_PORT` pour en changer).
+
 Sans Compose :
- 
+
 ```bash
-docker build -t splitticket .
+docker build -t splitticket --build-arg VITE_API_URL=https://api.mondomaine.com .
 docker run -d --name splitticket -p 8080:80 splitticket
 ```
- 
+
 Deux arguments de build, tous deux **publics** puisqu'ils sont intégrés au paquet livré :
- 
+
 | `--build-arg` | Effet |
 |---|---|
-| `VITE_API_URL` | URL publique de l'API (ex: `https://api.mondomaine.com`). Défaut : `/api` (utile pour le proxy Vite en dev local). |
+| `VITE_API_URL` | **Obligatoire.** URL publique de l'API (ex: `https://api.mondomaine.com`). Le build échoue si elle est vide, plutôt que de livrer un paquet qui appellerait un `/api` que cette image ne sert pas. Mettez `/api` explicitement si une passerelle à vous y achemine l'API. |
 | `VITE_SIGNUP_KEY` | Clé d'inscription, si l'instance en exige une pour enrôler un appareil. |
  
-**N'y placez jamais de secret** : ni clé Gemini, ni mot de passe. La clé Gemini vit côté API,
-chiffrée ; le jeton d'appareil est délivré par l'API et n'existe pas dans le build.
+**N'y placez jamais de secret** : ni clé Gemini, ni mot de passe. La clé Gemini de chaque
+utilisateur est chiffrée sur son appareil et l'API ne peut pas la lire ; le jeton d'appareil est
+délivré par l'API et n'existe pas dans le build.
  
 `docker/nginx.conf` sert l'application à la racine, gère le routage SPA (`try_files`) et le cache des assets statiques. Le conteneur écoute en HTTP ; terminez le TLS sur votre reverse proxy (indispensable pour l'installation PWA et le service worker).
 
@@ -223,12 +230,43 @@ prorata de la consommation de chacun, toujours par la méthode du plus fort rest
 
 ## Lecture des tickets
 
-L'appel au modèle de vision se fait **côté API**. Le navigateur n'a plus ni clé ni SDK Gemini :
-il envoie une photo, il reçoit un ticket structuré.
+Deux chemins, selon la clé qui paie l'appel :
 
-Ce déplacement apporte une chose concrète : **le serveur écrit le résultat sur le ticket avant
-de répondre**. Si la connexion tombe pendant les quelques secondes du modèle, rouvrir le ticket
-montre la lecture. Le travail n'est plus perdu avec la requête.
+| | Qui appelle Gemini | Où vit la clé |
+|---|---|---|
+| L'utilisateur a sa clé | **Ce navigateur**, directement | Chiffrée sur l'appareil, jamais vue par l'API |
+| Sinon | L'API, avec la clé de l'instance | Côté serveur — c'est sa clé, pas celle d'un tiers |
+
+Dans les deux cas, **l'API écrit le résultat sur le ticket avant de répondre** : si la connexion
+tombe pendant les quelques secondes du modèle, rouvrir le ticket montre la lecture. Le travail
+n'est pas perdu avec la requête.
+
+Et dans les deux cas c'est l'API qui **assainit** la réponse du modèle — analyse des montants,
+règles de taxes canadiennes. Le navigateur lui poste le texte brut : dupliquer cette logique
+ici, c'est la faire diverger de celle qui a les tests.
+
+### Pourquoi la clé ne passe pas par le serveur
+
+La clé Gemini d'un utilisateur est chiffrée **dans son navigateur** (`src/lib/crypto.ts`) avec
+une clé dérivée de son mot de passe. Une seule dérivation, deux branches indépendantes :
+
+```
+master = PBKDF2-SHA256(mot de passe, sel, 600 000)
+   ├─ HKDF(master, "…/auth") → proof, envoyé à la place du mot de passe
+   └─ HKDF(master, "…/kek")  → ouvre le coffre, ne quitte jamais le navigateur
+```
+
+L'API reçoit donc de quoi authentifier, jamais de quoi déchiffrer. Elle stocke un blob opaque,
+et une copie de sa base ne vaut rien. La KEK est conservée **non extractible** dans IndexedDB :
+rouvrir l'app déverrouille la clé sans redemander le mot de passe, et rien — pas même notre
+propre code — ne peut relire la matière de cette clé.
+
+La contrepartie est réelle et l'écran de réglages la dit : **un mot de passe oublié perd la clé
+Gemini enregistrée**, définitivement, pour tout le monde.
+
+Un dernier bénéfice, puisque l'appel part du navigateur : la clé peut être **restreinte par
+référent HTTP** dans la console Google, sur l'origine de ce front. Une clé qui fuirait malgré
+tout serait inutilisable ailleurs.
 
 ```
 src/capture/image.ts   Recadrage, rotation, réduction — avant l'envoi
