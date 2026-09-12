@@ -113,6 +113,17 @@ export const getKek = (): Promise<CryptoKey | null> => readDevice('kek', null);
 export const setKek = (kek: CryptoKey): Promise<void> => writeDevice('kek', kek);
 export const clearKek = (): Promise<void> => writeDevice('kek', null);
 
+/**
+ * Without an account, the Gemini key is kept here only: sealed with a device
+ * key generated on first use, non-extractable like the KEK above. Creating an
+ * account moves it to the server, sealed with the account's KEK instead.
+ */
+export const getDeviceKek = (): Promise<CryptoKey | null> => readDevice('deviceKek', null);
+export const setDeviceKek = (kek: CryptoKey): Promise<void> => writeDevice('deviceKek', kek);
+export const getLocalKeyBlob = (): Promise<string | null> => readDevice('localGeminiKey', null);
+export const setLocalKeyBlob = (blob: string | null): Promise<void> =>
+  writeDevice('localGeminiKey', blob);
+
 export async function getSettings(): Promise<Settings> {
   const stored = await readDevice<Partial<Settings>>('settings', {});
   return { ...DEFAULT_SETTINGS, ...stored };

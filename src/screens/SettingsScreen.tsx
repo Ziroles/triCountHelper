@@ -7,6 +7,7 @@ import { clearCache, estimateStorage, forgetEverything } from '../db';
 import * as api from '../api';
 import { TAX_REGIMES, type TipBasis } from '../types';
 import { hint } from '../lib/crypto';
+import { listModels as listModelsWithKey } from '../lib/gemini';
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} o`;
@@ -55,12 +56,14 @@ export function SettingsScreen() {
     try {
       await updateServerSettings({ geminiKey: value });
       setKeyDraft('');
-      setKeyStatus(value === '' ? 'Clé effacée.' : 'Clé chiffrée et enregistrée.');
+      setKeyStatus(
+        value === ''
+          ? 'Clé effacée.'
+          : accountEmail
+            ? 'Clé chiffrée et enregistrée sur votre compte.'
+            : 'Clé chiffrée et enregistrée sur cet appareil.',
+      );
     } catch (error) {
-      if (error instanceof Error && error.message === 'account_required') {
-        setKeyStatus('Créez un compte ci-dessous pour enregistrer votre clé.');
-        return;
-      }
       setKeyStatus(error instanceof Error ? error.message : 'Échec.');
     }
   };
@@ -111,8 +114,9 @@ export function SettingsScreen() {
             Votre clé API
             <span className="muted">
               {' '}
-              — chiffrée sur cet appareil avant d’être envoyée. Le serveur la conserve sans
-              pouvoir la lire : un mot de passe oublié la perd définitivement.
+              {accountEmail
+                ? '— chiffrée sur cet appareil avant d’être envoyée. Le serveur la conserve sans pouvoir la lire : un mot de passe oublié la perd définitivement.'
+                : '— chiffrée et gardée sur cet appareil seulement, jamais envoyée au serveur. Créez un compte pour la retrouver sur un autre appareil.'}
             </span>
           </span>
           <div className="row row--gap">
@@ -176,11 +180,18 @@ export function SettingsScreen() {
           )}
         </label>
         <Button
-          disabled={!online || noKeyAnywhere || modelsStatus === 'Vérification…'}
+          disabled={
+            !online ||
+            (keyDraft.trim() === '' && noKeyAnywhere) ||
+            modelsStatus === 'Vérification…'
+          }
           onClick={() => {
             setModelsStatus('Vérification…');
-            void api
-              .listModels()
+            /* Check the key that is about to be used: the one being typed, then
+               the user's own — both asked of Google directly, from here. Only
+               without either is the server's key the one checked. */
+            const ownKey = keyDraft.trim() || geminiKey;
+            void (ownKey ? listModelsWithKey(ownKey) : api.listModels())
               .then((found) => {
                 setModels(found);
                 setModelsStatus(
