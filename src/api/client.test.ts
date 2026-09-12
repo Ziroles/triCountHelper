@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ApiError, request, requestBlob } from './client';
+import { API_BASE, ApiError, request, requestBlob } from './client';
 import { forgetEverything, getDeviceToken, setDeviceToken } from '../db';
 
 type Call = { url: string; token: string | null; body: unknown };
@@ -59,9 +59,10 @@ describe('appareil que le serveur ne connaît plus', () => {
     expect(result).toEqual({ ok: true, token: 'token-1' });
     expect(await getDeviceToken()).toBe('token-1');
     expect(calls.map((call) => [call.url, call.token, call.body])).toEqual([
-      ['/api/v1/me/settings', 'stale-token', '{"geminiModel":"m"}'],
-      ['/api/v1/devices', null, undefined],
-      ['/api/v1/me/settings', 'token-1', '{"geminiModel":"m"}'],
+      // API_BASE rather than "/api": a local .env with VITE_API_URL must not break the test.
+      [`${API_BASE}/v1/me/settings`, 'stale-token', '{"geminiModel":"m"}'],
+      [`${API_BASE}/v1/devices`, null, undefined],
+      [`${API_BASE}/v1/me/settings`, 'token-1', '{"geminiModel":"m"}'],
     ]);
   });
 

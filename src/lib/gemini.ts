@@ -173,3 +173,54 @@ export async function readReceipt(
   done('read', { characters: text.length });
   return text;
 }
+
+/* Same filter as the API's `list_models`: the vision-capable families. */
+const MULTIMODAL_PREFIXES = ['gemini-1.5', 'gemini-2', 'gemini-3', 'gemini-flash', 'gemini-pro'];
+
+/**
+ * Models this key can read a receipt with — asked of Google directly.
+ *
+ * This is what checks a personal key. The API's `/v1/models` only knows the
+ * instance key: asking it about a key it has never seen answers for the wrong
+ * one, or "no key" when the instance has none.
+ */
+export async function listModels(
+  apiKey: string,
+  signal?: AbortSignal,
+): Promise<{ name: string; displayName: string }[]> {
+  let response: Response;
+  try {
+    response = await fetch(`${ENDPOINT}?pageSize=1000`, {
+      signal,
+      headers: { 'x-goog-api-key': apiKey },
+    });
+  } catch (error) {
+    log.error('gemini unreachable', error);
+    throw new GeminiError('Could not reach Google. Check your connection.', 'unreachable', true);
+  }
+
+  if (!response.ok) {
+    log.warn('gemini refused the model listing', { status: response.status });
+    throw new GeminiError(
+      messageForStatus(response.status),
+      response.status === 429 ? 'quota' : 'refused',
+      response.status === 429 || response.status >= 500,
+    );
+  }
+
+  const body = (await response.json()) as {
+    models?: { name?: string; displayName?: string; supportedGenerationMethods?: string[] }[];
+  };
+  return (body.models ?? [])
+    .filter(
+      (entry) =>
+        entry.supportedGenerationMethods === undefined ||
+        entry.supportedGenerationMethods.includes('generateContent'),
+    )
+    .map((entry) => {
+      const name = (entry.name ?? '').replace(/^models\//, '');
+      return { name, displayName: entry.displayName || name };
+    })
+    .filter((entry) => MULTIMODAL_PREFIXES.some((prefix) => entry.name.startsWith(prefix)))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}

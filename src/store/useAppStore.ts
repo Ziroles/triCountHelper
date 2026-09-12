@@ -23,7 +23,7 @@ import { create } from 'zustand';
 import * as api from '../api';
 import { ApiError, OfflineError } from '../api';
 import * as db from '../db';
-import { open as openSealed, seal } from '../lib/crypto';
+import { newDeviceKek, open as openSealed, seal } from '../lib/crypto';
 import { logger } from '../lib/log';
 import { colorForIndex } from '../lib/people';
 import { currentRoute, routeToPath } from '../lib/routing';
@@ -57,10 +57,11 @@ type State = {
   settings: Settings;
   server: ServerSettings;
   /**
-   * The user's Gemini key, opened from `server.geminiKeyBlob`. In memory only:
-   * it is never written anywhere, and the API has never seen it. Null means
-   * either "none saved" or "the local key cannot open the blob any more",
-   * which the settings screen tells apart.
+   * The user's Gemini key, in memory. Opened from `server.geminiKeyBlob` when an
+   * account holds it, or from the copy sealed on this device alone when there is
+   * no account. Never written anywhere in the clear, and never seen by the API.
+   * Null means either "none saved" or "the local key cannot open the blob any
+   * more", which the settings screen tells apart.
    */
   geminiKey: string | null;
   accountEmail: string | null;
@@ -133,6 +134,48 @@ async function openStoredKey(blob: string | null): Promise<string | null> {
   if (blob === null) return null;
   const kek = await db.getKek();
   return kek === null ? null : openSealed(kek, blob);
+}
+
+/**
+ * The key saved without an account. Sealed with a key generated on this device,
+ * non-extractable, that never leaves IndexedDB: there is no password to derive
+ * from, so nothing to sync either.
+ */
+async function openLocalKey(): Promise<string | null> {
+  const [blob, kek] = await Promise.all([db.getLocalKeyBlob(), db.getDeviceKek()]);
+  return blob === null || kek === null ? null : openSealed(kek, blob);
+}
+
+async function sealLocally(key: string): Promise<void> {
+  let kek = await db.getDeviceKek();
+  if (kek === null) {
+    kek = await newDeviceKek();
+    await db.setDeviceKek(kek);
+  }
+  await db.setLocalKeyBlob(await seal(kek, key));
+}
+
+/**
+ * A key saved before the account existed follows it as soon as it does: sealed
+ * with the account's KEK, sent, and the device-only copy dropped. A failure
+ * leaves both where they were — the next start tries again.
+ */
+async function adoptLocalKey(
+  accountEmail: string | null,
+  key: string,
+  server: ServerSettings,
+): Promise<ServerSettings> {
+  const kek = accountEmail === null ? null : await db.getKek();
+  if (kek === null) return server;
+  try {
+    const updated = await api.updateServerSettings({ geminiKeyBlob: await seal(kek, key) });
+    await db.setLocalKeyBlob(null);
+    log.info('device-only Gemini key moved to the account');
+    return updated;
+  } catch (error) {
+    log.warn('could not move the Gemini key to the account yet', error);
+    return server;
+  }
 }
 
 /** A group's participants, in the shape `lib/compute.ts` expects. */
@@ -353,6 +396,8 @@ export const useAppStore = create<AppStore>((set, get) => {
           })
           .catch((error) => log.warn('/health unreachable — the network, probably', error));
 
+        // A key kept on this device alone needs no network: usable even if /me fails.
+        set({ geminiKey: await openLocalKey() });
         await Promise.all([get().refreshGroups(), get().refreshMe()]);
         booted('application ready');
       })();
@@ -563,25 +608,33 @@ export const useAppStore = create<AppStore>((set, get) => {
       if (patch.geminiModel !== undefined) wire.geminiModel = patch.geminiModel;
 
       let geminiKey = get().geminiKey;
+      // Dropped only once the server has answered: a failed upload must not
+      // lose the only copy there is.
+      let dropLocalCopy = false;
       if (patch.geminiKey !== undefined) {
         const key = patch.geminiKey.trim();
         if (key === '') {
           wire.geminiKeyBlob = '';
+          dropLocalCopy = true;
           geminiKey = null;
         } else {
-          const kek = await db.getKek();
+          const kek = get().accountEmail === null ? null : await db.getKek();
           if (kek === null) {
-            // No account, or a session never opened on this device: there is
-            // nothing to seal with, and storing an unopenable blob would be
-            // worse than refusing.
-            throw new Error('account_required');
+            // No account — or one never unlocked on this device: nothing to seal
+            // a shareable blob with. The key stays here, sealed locally, and
+            // follows the account once there is one (see `refreshMe`).
+            await sealLocally(key);
+          } else {
+            wire.geminiKeyBlob = await seal(kek, key);
+            dropLocalCopy = true;
           }
-          wire.geminiKeyBlob = await seal(kek, key);
           geminiKey = key;
         }
       }
 
-      const server = await api.updateServerSettings(wire);
+      const server =
+        Object.keys(wire).length > 0 ? await api.updateServerSettings(wire) : get().server;
+      if (dropLocalCopy) await db.setLocalKeyBlob(null);
       set({ server, geminiKey });
     },
 
@@ -594,11 +647,18 @@ export const useAppStore = create<AppStore>((set, get) => {
           geminiKey: me.settings.geminiKeyBlob !== null,
           model: me.settings.geminiModel,
         });
-        set({
-          server: me.settings,
-          geminiKey: await openStoredKey(me.settings.geminiKeyBlob),
-          accountEmail: me.accountEmail,
-        });
+        let server = me.settings;
+        let geminiKey = await openStoredKey(server.geminiKeyBlob);
+        if (geminiKey === null) {
+          const localKey = await openLocalKey();
+          if (localKey !== null) {
+            geminiKey = localKey;
+            if (server.geminiKeyBlob === null) {
+              server = await adoptLocalKey(me.accountEmail, localKey, server);
+            }
+          }
+        }
+        set({ server, geminiKey, accountEmail: me.accountEmail });
       } catch (error) {
         log.debug('server settings unavailable, keeping the previous ones', error);
         // With no network we keep what we knew: server settings do not block

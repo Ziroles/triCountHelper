@@ -108,6 +108,14 @@ export async function derive(password: string, salt: string): Promise<Derived> {
   return { proof: toBase64(new Uint8Array(proofBits)), kek };
 }
 
+/**
+ * A key for this device alone, for a user without an account: random rather
+ * than derived, since there is no password. Non-extractable, like the KEK.
+ */
+export function newDeviceKek(): Promise<CryptoKey> {
+  return crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+}
+
 /** Gemini key → blob for the server. A fresh iv every time, as AES-GCM demands. */
 export async function seal(kek: CryptoKey, plaintext: string): Promise<string> {
   const iv = crypto.getRandomValues(new Uint8Array(12));
