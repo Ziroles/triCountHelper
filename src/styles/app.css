@@ -10,8 +10,12 @@
   border: 0;
 }
 
+/* Fixed height: the page never scrolls, only .screen__body does, so the
+   footer (e.g. "Nouveau ticket") stays pinned to the bottom of the screen. */
 .app {
-  min-height: 100%;
+  height: 100%;
+  height: 100dvh;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
 }

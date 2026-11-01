@@ -173,7 +173,7 @@ export function CaptureScreen({ receipt, onBack, onDone, onSkip, onManual }: Cap
         ) : (
           <>
             <Button variant="primary" full onClick={() => fileInput.current?.click()}>
-              Prendre une photo
+              Prendre ou choisir une photo
             </Button>
             <button type="button" className="linkButton linkButton--center" onClick={onManual}>
               Saisir le ticket à la main
@@ -182,11 +182,12 @@ export function CaptureScreen({ receipt, onBack, onDone, onSkip, onManual }: Cap
         )
       }
     >
+      {/* No `capture` attribute: it would open the camera directly, while
+          without it the phone offers the choice between camera and gallery. */}
       <input
         ref={fileInput}
         type="file"
         accept="image/*"
-        capture="environment"
         className="visually-hidden"
         onChange={(event) => accept(event.target.files?.[0])}
       />
