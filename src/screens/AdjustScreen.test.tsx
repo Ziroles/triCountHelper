@@ -69,6 +69,49 @@ describe('plats et ajustements', () => {
 
   const receipt = () => useAppStore.getState().receipt;
 
+  it('préremplit les plats comme d’habitude, une seule fois', async () => {
+    const id = receipt()?.id ?? [...state.receipts.keys()][0]!;
+    state.receipts.set(id, {
+      ...state.receipts.get(id)!,
+      lines: [
+        lineOf('l1', 'Tartare', 3000, [{ personId: 'm-mathieu', shares: 1 }]),
+        lineOf('l2', 'Pâtes', 2000, []),
+      ],
+    });
+    state.suggestions = [
+      { lineId: 'l2', assignments: [{ personId: 'm-lea', shares: 1 }], seen: 3, occurrences: 4 },
+    ];
+    const user = await openDishes();
+
+    expect(await screen.findByText(/1 plat attribué comme d’habitude/)).toBeInTheDocument();
+    expect(screen.getByText('comme d’habitude')).toBeInTheDocument();
+    expect(receipt()?.lines[1]?.assignments).toEqual([{ personId: 'm-lea', shares: 1 }]);
+    expect(receipt()?.suggestedAt).toBeTruthy();
+
+    // Touched by hand: the dish is the user's, the mark goes.
+    await user.click(screen.getByText('Pâtes'));
+    await waitFor(() => expect(receipt()?.suggestedLineIds).toEqual([]));
+    expect(screen.queryByText('comme d’habitude')).not.toBeInTheDocument();
+    expect(state.suggestionCalls).toBe(1);
+  });
+
+  it('annule les plats préremplis', async () => {
+    const id = [...state.receipts.keys()][0]!;
+    state.receipts.set(id, {
+      ...state.receipts.get(id)!,
+      lines: [lineOf('l2', 'Pâtes', 2000, [])],
+    });
+    state.suggestions = [
+      { lineId: 'l2', assignments: [{ personId: 'm-lea', shares: 1 }], seen: 1, occurrences: 1 },
+    ];
+    const user = await openDishes();
+
+    await screen.findByText(/attribué comme d’habitude/);
+    await user.click(screen.getByRole('button', { name: 'Annuler' }));
+    await waitFor(() => expect(receipt()?.lines[0]?.assignments).toEqual([]));
+    expect(screen.queryByText(/comme d’habitude/)).not.toBeInTheDocument();
+  });
+
   it('attribue un plat à plusieurs convives d’un seul toucher', async () => {
     const user = await openDishes();
 

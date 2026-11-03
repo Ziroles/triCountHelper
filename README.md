@@ -164,6 +164,14 @@ direct), on vérifie taxes, remises et pourboire, puis on choisit qui a payé et
 Tricount. La correction des lignes (libellés, prix, quantités) s'ouvre depuis le menu « ⋯ » de
 l'étape Plats, et c'est le point d'entrée de la saisie manuelle.
 
+**Comme d'habitude** : à l'étape Plats, les plats que personne n'a encore pris sont préremplis
+d'après les tickets précédents du groupe — la bière à qui la prend d'habitude, le lait à ceux qui
+le partagent. Le rapprochement se fait sur le libellé, sans casse, accents ni ponctuation ; en
+cas d'hésitation, l'habitude la plus fréquente l'emporte, puis la plus récente. Un bandeau dit
+combien de plats ont été préremplis et permet d'annuler ; un plat touché à la main perd sa
+marque. Les suggestions ne sont proposées qu'une fois par lecture : un plat laissé à tous exprès
+n'est pas rempli dans le dos de l'utilisateur.
+
 L'étape courante est mémorisée **sur le ticket, côté serveur** : le rouvrir plus tard, ou depuis
 un autre appareil, reprend là où il avait été laissé. L'étape Ajustements n'existe que côté
 client (l'API ne connaît que `capture`, `processing`, `verify`, `assign`, `results`) : elle est

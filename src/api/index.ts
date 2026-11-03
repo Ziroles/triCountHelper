@@ -9,12 +9,13 @@
 import { API_BASE, request, requestBlob } from './client';
 import { derive, newSalt } from '../lib/crypto';
 import { setKek } from '../db';
-import { fromWire, toWire, type WireReceipt } from './wire';
+import { fromWire, suggestionsFromWire, toWire, type WireReceipt, type WireSuggestions } from './wire';
 import type {
   Group,
   GroupSummary,
   Receipt,
   ReceiptSummary,
+  SuggestedLine,
   ServerSettings,
 } from '../types';
 
@@ -134,6 +135,17 @@ export async function writeReceipt(receipt: Receipt): Promise<Receipt> {
     body: toWire(receipt),
   });
   return fromWire(wire);
+}
+
+/**
+ * Who usually takes each dish not taken yet, from the group's previous
+ * receipts. Computed on the dishes the server has: save first.
+ */
+export async function suggestAssignments(receiptId: string): Promise<SuggestedLine[]> {
+  const wire = await request<WireSuggestions>(
+    `/v1/receipts/${encodeURIComponent(receiptId)}/suggestions`,
+  );
+  return suggestionsFromWire(wire);
 }
 
 export const deleteReceipt = (receiptId: string): Promise<void> =>
