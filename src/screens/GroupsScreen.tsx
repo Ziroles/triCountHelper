@@ -5,7 +5,7 @@ import { Sheet } from '../ui/Sheet';
 import { Banner } from '../ui/Banner';
 import { useAppStore } from '../store/useAppStore';
 import { useLongPress } from '../hooks/useLongPress';
-import { formatFrenchDate } from '../lib/export';
+import { formatShortDate } from '../lib/export';
 import type { GroupSummary } from '../types';
 
 /**
@@ -31,9 +31,7 @@ function GroupRow({
       <span className="list__title">{group.title}</span>
       <span className="list__meta">
         {group.memberCount} participant{group.memberCount > 1 ? 's' : ''}
-        {' · '}
-        {group.receiptCount} ticket{group.receiptCount > 1 ? 's' : ''}
-        {group.lastActivityAt ? ` · ${formatFrenchDate(group.lastActivityAt)}` : ''}
+        {group.lastActivityAt ? `, dernier ticket le ${formatShortDate(group.lastActivityAt)}` : ''}
       </span>
     </button>
   );
@@ -46,21 +44,46 @@ export function GroupsScreen() {
   const loadError = useAppStore((s) => s.loadError);
   const navigate = useAppStore((s) => s.navigate);
   const leaveGroup = useAppStore((s) => s.leaveGroup);
+  const lostAccountEmail = useAppStore((s) => s.lostAccountEmail);
+  const dismissLostAccount = useAppStore((s) => s.dismissLostAccount);
   const [pendingLeave, setPendingLeave] = useState<GroupSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   return (
     <Screen
-      title="SplitTicket"
+      title="Groupes"
       action={
         <button type="button" className="linkButton" onClick={() => navigate({ name: 'settings' })}>
           Réglages
         </button>
       }
-      banner={loadError ? <Banner tone="warn">{loadError}</Banner> : null}
+      banner={
+        lostAccountEmail ? (
+          <Banner
+            tone="warn"
+            label="Session perdue"
+            action={
+              <>
+                <Button variant="primary" onClick={() => navigate({ name: 'settings' })}>
+                  Se reconnecter
+                </Button>
+                <button type="button" className="linkButton" onClick={dismissLostAccount}>
+                  Continuer sans compte
+                </button>
+              </>
+            }
+          >
+            <strong>Reconnectez-vous.</strong> Cet appareil n’est plus connecté au compte{' '}
+            {lostAccountEmail} : le navigateur a effacé ses données. Vos groupes et votre clé
+            Gemini sont sur le compte.
+          </Banner>
+        ) : loadError ? (
+          <Banner tone="warn">{loadError}</Banner>
+        ) : null
+      }
       footer={
         <Button variant="primary" full disabled={!online} onClick={() => navigate({ name: 'join' })}>
-          Rejoindre un groupe
+          Lier un groupe Tricount
         </Button>
       }
     >
@@ -69,8 +92,8 @@ export function GroupsScreen() {
           <p className="empty">Chargement…</p>
         ) : (
           <p className="empty">
-            Aucun groupe pour l’instant. Collez le lien de partage d’un tricount : ses
-            participants viendront avec, et vos tickets s’y rangeront.
+            Aucun groupe pour l’instant. Liez un tricount avec son lien de partage : ses
+            participants viendront avec.
           </p>
         )
       ) : (
@@ -88,7 +111,7 @@ export function GroupsScreen() {
                 aria-label={`Quitter ${group.title}`}
                 onClick={() => setPendingLeave(group)}
               >
-                ✕
+                <span aria-hidden="true">✕</span>
               </button>
             </li>
           ))}

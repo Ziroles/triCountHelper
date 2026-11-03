@@ -8,7 +8,7 @@
  *  - the **device token**, the only genuinely indispensable piece of data;
  *  - a **cache** of the groups, receipts and photos already viewed, so the app
  *    stays readable offline;
- *  - the **display preferences** (theme, tax regime, default tip), which are of
+ *  - the **display preferences** (tax regime, default tip), which are of
  *    no interest to anyone but this device.
  *
  * Nothing written here is sent back to the server: the cache is disposable, and

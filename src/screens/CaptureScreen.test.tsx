@@ -78,7 +78,7 @@ describe('photo d’un ticket rouvert', () => {
     await screen.findByRole('heading', { name: 'Photo du ticket' });
 
     expect(await screen.findByAltText(/ticket/i)).toHaveAttribute('src', 'blob:ticket');
-    expect(screen.queryByText(/Déposez une photo ici/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/déposez une image ici/)).not.toBeInTheDocument();
   });
 
   it('rouvre le ticket sur sa photo, sans relancer la lecture', async () => {
@@ -94,8 +94,26 @@ describe('photo d’un ticket rouvert', () => {
     await screen.findByRole('heading', { name: 'Photo du ticket' });
     expect(await screen.findByAltText(/ticket/i)).toHaveAttribute('src', 'blob:ticket');
 
+    // Keeping the reading goes straight to the dishes, step 1.
     await user.click(screen.getByRole('button', { name: 'Garder la lecture actuelle' }));
-    await screen.findByRole('heading', { name: 'Vérification' });
-    expect(screen.getByDisplayValue('Chez Victoire')).toBeInTheDocument();
+    await screen.findByText('Étape 1 sur 3');
+    expect(screen.getByRole('heading', { name: 'Chez Victoire' })).toBeInTheDocument();
+  });
+
+  it('demande confirmation avant qu’une relecture remplace les lignes', async () => {
+    const user = await openStoredReceipt();
+
+    await user.click(screen.getByRole('button', { name: 'Retour' }));
+    await screen.findByRole('heading', { name: 'Photo du ticket' });
+    await screen.findByAltText(/ticket/i);
+
+    await user.click(screen.getByRole('button', { name: 'Relire le ticket' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Relire le ticket' });
+    expect(dialog).toHaveTextContent(/déjà 1 ligne/);
+    await user.click(screen.getByRole('button', { name: 'Annuler' }));
+
+    expect(screen.queryByRole('dialog', { name: 'Relire le ticket' })).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Photo du ticket' })).toBeInTheDocument();
+    expect(useAppStore.getState().receipt?.lines).toHaveLength(1);
   });
 });

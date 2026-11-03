@@ -3,9 +3,11 @@ import { Screen } from '../ui/Screen';
 import { Button } from '../ui/Button';
 import * as api from '../api';
 import { ApiError } from '../api';
-import { GeminiError, readReceipt } from '../lib/gemini';
+import { readReceipt } from '../lib/gemini';
+import { describeReadingError, type ReadingError } from '../lib/errors';
 import { logger } from '../lib/log';
 import { useAppStore } from '../store/useAppStore';
+import { useReceiptImage } from '../hooks/useReceiptImage';
 import type { Receipt } from '../types';
 
 const log = logger('scan');
@@ -40,11 +42,15 @@ type ProcessingScreenProps = {
   receipt: Receipt;
   onBack: () => void;
   onDone: () => void;
+  /** The reading failed or was given up on: enter the lines by hand. */
+  onManual: () => void;
+  /** Back to the photo, to take or frame it again. */
+  onRetake: () => void;
 };
 
 type Phase =
   | { kind: 'working' }
-  | { kind: 'error'; message: string; retryable: boolean; missingKey: boolean };
+  | { kind: 'error'; error: ReadingError };
 
 /**
  * Reading of the receipt by the vision model.
@@ -59,18 +65,22 @@ type Phase =
  * if the screen is closed or the connection drops during the model's few
  * seconds, the reading is not lost — reopening the receipt shows it.
  */
-export function ProcessingScreen({ receipt, onBack, onDone }: ProcessingScreenProps) {
+export function ProcessingScreen({
+  receipt,
+  onBack,
+  onDone,
+  onManual,
+  onRetake,
+}: ProcessingScreenProps) {
   const updateReceipt = useAppStore((s) => s.updateReceipt);
   const navigate = useAppStore((s) => s.navigate);
   const geminiKey = useAppStore((s) => s.geminiKey);
   const model = useAppStore((s) => s.server.geminiModel);
   const [phase, setPhase] = useState<Phase>({ kind: 'working' });
   const started = useRef(false);
+  const [wait, setWait] = useState(0);
 
-  const toManualEntry = useCallback(() => {
-    updateReceipt({ step: 'verify' });
-    onDone();
-  }, [updateReceipt, onDone]);
+  const imageUrl = useReceiptImage(receipt.id, receipt.imageId);
 
   const run = useCallback(async () => {
     setPhase({ kind: 'working' });
@@ -89,19 +99,16 @@ export function ProcessingScreen({ receipt, onBack, onDone }: ProcessingScreenPr
           `stated total ${scanned.statedTotalCents ?? '—'}`,
       );
       updateReceipt(scanned);
-      onDone();
+      // Nothing read: there are no dishes to hand out, the lines must be typed.
+      if (scanned.lines.length === 0) onManual();
+      else onDone();
     } catch (error) {
-      const missingKey = error instanceof ApiError && error.code === 'no_gemini_key';
-      log.error(missingKey ? 'reading impossible: no Gemini key' : 'reading failed', error);
-      setPhase({
-        kind: 'error',
-        message: error instanceof Error ? error.message : "La lecture n'a pas abouti.",
-        retryable:
-          error instanceof ApiError || error instanceof GeminiError ? error.retryable : true,
-        missingKey,
-      });
+      const described = describeReadingError(error, geminiKey === null ? null : model);
+      log.error(`reading failed: ${described.code}`, error);
+      setWait(described.retryAfterSeconds ?? 0);
+      setPhase({ kind: 'error', error: described });
     }
-  }, [receipt.id, geminiKey, model, updateReceipt, onDone]);
+  }, [receipt.id, geminiKey, model, updateReceipt, onDone, onManual]);
 
   useEffect(() => {
     if (started.current) return;
@@ -109,43 +116,73 @@ export function ProcessingScreen({ receipt, onBack, onDone }: ProcessingScreenPr
     void run();
   }, [run]);
 
+  // Google said how long to wait: count down before allowing a retry.
+  useEffect(() => {
+    if (wait <= 0) return undefined;
+    const timer = window.setTimeout(() => setWait((n) => n - 1), 1000);
+    return () => window.clearTimeout(timer);
+  }, [wait]);
+
+  const failure = phase.kind === 'error' ? phase.error : null;
+  const failed = failure !== null;
+
+  const act = (action: ReadingError['action']) => {
+    if (action === 'retry') void run();
+    else if (action === 'settings') navigate({ name: 'settings' });
+    else if (action === 'retake') onRetake();
+    else onManual();
+  };
+
   return (
-    <Screen title="Lecture" onBack={onBack}>
-      {phase.kind === 'error' ? (
-        <div className="stack">
-          <p className="warnText">{phase.message}</p>
-          <p className="muted">
-            La saisie manuelle reste disponible : les lignes se corrigent aussi vite qu’elles se
-            tapent.
-          </p>
-          <div className="row row--gap">
-            {phase.retryable ? (
+    <Screen
+      title="Lecture du ticket"
+      onBack={onBack}
+      footer={
+        failure ? (
+          <>
+            <Button
+              variant="primary"
+              full
+              disabled={failure.action === 'retry' && wait > 0}
+              onClick={() => act(failure.action)}
+            >
+              {failure.action === 'retry' && wait > 0
+                ? `Réessayer dans ${wait} s`
+                : failure.actionLabel}
+            </Button>
+            {failure.action !== 'retry' && failure.action !== 'manual' && failure.code !== 'no_key' ? (
               <Button full onClick={() => void run()}>
                 Réessayer
               </Button>
             ) : null}
-            {phase.missingKey ? (
-              <Button full onClick={() => navigate({ name: 'settings' })}>
-                Ouvrir les réglages
-              </Button>
+            {failure.action !== 'manual' ? (
+              <button type="button" className="linkButton linkButton--center" onClick={onManual}>
+                Saisir à la main
+              </button>
             ) : null}
-            <Button variant="primary" full onClick={toManualEntry}>
-              Saisir à la main
-            </Button>
+          </>
+        ) : null
+      }
+    >
+      <div className="reading">
+        {imageUrl ? <img className="reading__thumb" src={imageUrl} alt="Photo du ticket" /> : null}
+        {failed ? (
+          <div className="reading__text" role="alert">
+            <p className="reading__title">{failure.title}</p>
+            <p className="muted">{failure.detail}</p>
           </div>
-        </div>
-      ) : (
-        <div className="stack stack--center">
-          <p className="progress__label">Lecture du ticket</p>
-          <div className="progress" role="progressbar" aria-label="Lecture du ticket">
-            <div className="progress__bar progress__bar--pulse" />
+        ) : (
+          <div className="reading__text">
+            <p className="reading__title">Lecture du ticket…</p>
+            <div className="progress" role="progressbar" aria-label="Lecture du ticket">
+              <div className="progress__bar progress__bar--pulse" />
+            </div>
+            <p className="muted">
+              Quelques secondes. Le résultat est conservé même si vous quittez cet écran.
+            </p>
           </div>
-          <p className="muted">
-            Le serveur lit la photo. Comptez quelques secondes — le résultat est conservé même
-            si vous quittez cet écran.
-          </p>
-        </div>
-      )}
+        )}
+      </div>
     </Screen>
   );
 }

@@ -1,58 +1,48 @@
 import type { CSSProperties } from 'react';
 import { initialsOf } from '../lib/people';
-import { useLongPress } from '../hooks/useLongPress';
 import type { Person } from '../types';
 
 type PersonPillProps = {
   person: Person;
+  /** sm : pastille 22px sur une ligne de plat ; md : 36px (Envoi) ; lg : 44px (convives). */
+  size?: 'sm' | 'md' | 'lg';
   selected?: boolean;
-  /** Default split: the person was not picked by hand. */
-  ghost?: boolean;
-  size?: 'sm' | 'md';
-  onClick?: () => void;
-  onLongPress?: () => void;
   title?: string;
+  /** The name is already written next to the avatar: hide it from screen readers. */
+  decorative?: boolean;
 };
 
+/** Avatar rond à la couleur du convive, toujours accompagné de ses initiales. */
 export function PersonPill({
   person,
-  selected = false,
-  ghost = false,
   size = 'md',
-  onClick,
-  onLongPress,
+  selected = false,
   title,
+  decorative = false,
 }: PersonPillProps) {
-  const press = useLongPress({ onLongPress: onLongPress ?? (() => undefined), onClick });
-  const style = { '--pill-color': person.color ?? 'var(--person-1)' } as CSSProperties;
-  const tone = ghost ? ' pill--ghost' : '';
-  const content = (
-    <>
+  const style = { '--pill-color': person.color ?? 'var(--st-p1)' } as CSSProperties;
+  return (
+    <span
+      className={`pill pill--${size}${selected ? ' pill--on' : ''}`}
+      style={style}
+      title={decorative ? undefined : (title ?? person.name)}
+      aria-hidden={decorative || undefined}
+    >
       <span className="pill__initials" aria-hidden="true">
         {initialsOf(person.name)}
       </span>
       <span className="visually-hidden">{person.name}</span>
-    </>
+    </span>
   );
+}
 
-  if (!onClick && !onLongPress) {
-    return (
-      <span className={`pill pill--${size}${tone}`} style={style} title={title ?? person.name}>
-        {content}
-      </span>
-    );
-  }
-
+/** Pastilles chevauchées des personnes d'un plat. */
+export function PillStack({ people }: { people: Person[] }) {
   return (
-    <button
-      type="button"
-      className={`pill pill--${size}${tone}${selected ? ' pill--on' : ''}`}
-      style={style}
-      title={title ?? person.name}
-      aria-pressed={onClick ? selected : undefined}
-      {...(onLongPress ? press : { onClick })}
-    >
-      {content}
-    </button>
+    <span className="pillStack">
+      {people.map((person) => (
+        <PersonPill key={person.id} person={person} size="sm" />
+      ))}
+    </span>
   );
 }

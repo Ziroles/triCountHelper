@@ -9,7 +9,7 @@ import { useAppStore } from '../store/useAppStore';
 import { formatCents, roundHalfUp } from '../lib/money';
 import { adjustmentsTotal, subtotalOf, taxesTotalOf } from '../lib/compute';
 import { uid } from '../lib/id';
-import { regimeByCode, type Receipt, type ReceiptLine, type ReceiptTax } from '../types';
+import type { Receipt, ReceiptLine } from '../types';
 
 type VerifyScreenProps = {
   receipt: Receipt;
@@ -82,7 +82,6 @@ export function VerifyScreen({ receipt, onBack, onDone }: VerifyScreenProps) {
   const [photoOpen, setPhotoOpen] = useState(false);
   const imageUrl = useReceiptImage(receipt.id, receipt.imageId);
 
-  const settings = useAppStore((s) => s.settings);
   const subtotal = useMemo(() => subtotalOf(receipt), [receipt]);
   const taxes = taxesTotalOf(receipt.taxes);
   const adjustments = adjustmentsTotal(receipt.adjustments);
@@ -142,51 +141,6 @@ export function VerifyScreen({ receipt, onBack, onDone }: VerifyScreenProps) {
     }));
   };
 
-  const patchTax = (id: string, patch: Partial<ReceiptTax>) => {
-    updateReceipt((current) => ({
-      ...current,
-      taxes: current.taxes.map((tax) => (tax.id === id ? { ...tax, ...patch } : tax)),
-    }));
-  };
-
-  const removeTax = (id: string) => {
-    updateReceipt((current) => ({
-      ...current,
-      taxes: current.taxes.filter((tax) => tax.id !== id),
-    }));
-  };
-
-  const addRegimeTaxes = () => {
-    const regime = regimeByCode(settings.taxRegimeCode);
-    updateReceipt((current) => ({
-      ...current,
-      taxes: regime.taxes.map((tax) => ({
-        id: uid(),
-        code: tax.code,
-        label: tax.label,
-        ratePercent: tax.ratePercent,
-        amountCents: 0,
-      })),
-    }));
-  };
-
-  const absorbGap = () => {
-    if (gap === 0) return;
-    updateReceipt((current) => ({
-      ...current,
-      adjustments: [
-        ...current.adjustments,
-        {
-          id: uid(),
-          label: 'Écart de saisie',
-          amountCents: -gap,
-          mode: 'proportional',
-          assignments: [],
-        },
-      ],
-    }));
-  };
-
   return (
     <Screen
       title="Vérification"
@@ -202,13 +156,6 @@ export function VerifyScreen({ receipt, onBack, onDone }: VerifyScreenProps) {
         <Banner
           label="Contrôle du total"
           tone={stated !== null && gap !== 0 ? 'warn' : 'neutral'}
-          action={
-            stated !== null && gap !== 0 ? (
-              <button type="button" className="linkButton" onClick={absorbGap}>
-                Ajouter en ajustement
-              </button>
-            ) : null
-          }
         >
           {stated === null ? (
             <>
@@ -244,7 +191,7 @@ export function VerifyScreen({ receipt, onBack, onDone }: VerifyScreenProps) {
       }
       footer={
         <Button variant="primary" full onClick={onDone} disabled={receipt.lines.length === 0}>
-          Attribuer
+          Continuer
         </Button>
       }
     >
@@ -292,6 +239,14 @@ export function VerifyScreen({ receipt, onBack, onDone }: VerifyScreenProps) {
         </div>
       </div>
 
+      {receipt.lines.length === 0 ? (
+        <p className="muted">
+          {receipt.imageId
+            ? 'La lecture n’a trouvé aucune ligne. Saisissez-les ici, ou reprenez une photo plus nette.'
+            : 'Aucune ligne pour l’instant. Ajoutez celles du ticket.'}
+        </p>
+      ) : null}
+
       <ul className="lines">
         {receipt.lines.map((line) => (
           <li key={line.id} className="lineRow">
@@ -331,7 +286,7 @@ export function VerifyScreen({ receipt, onBack, onDone }: VerifyScreenProps) {
                 aria-label={`Supprimer ${line.label || 'la ligne'}`}
                 onClick={() => removeLine(line.id)}
               >
-                ✕
+                <span aria-hidden="true">✕</span>
               </button>
             </div>
             <div className="lineRow__bottom">
@@ -372,80 +327,9 @@ export function VerifyScreen({ receipt, onBack, onDone }: VerifyScreenProps) {
         + Ajouter une ligne
       </button>
 
-      <div className="stack">
-        <div className="row row--between">
-          <h2>Taxes</h2>
-          {receipt.taxes.length === 0 ? (
-            <button type="button" className="linkButton" onClick={addRegimeTaxes}>
-              + {regimeByCode(settings.taxRegimeCode).label}
-            </button>
-          ) : (
-            <span className="num muted">{formatCents(taxes)}</span>
-          )}
-        </div>
-        {receipt.taxes.length === 0 ? (
-          <p className="muted">
-            Aucune taxe lue sur ce ticket. Ajoutez-les si elles y figurent : les prix des
-            lignes sont hors taxes.
-          </p>
-        ) : (
-          <ul className="lines">
-            {receipt.taxes.map((tax) => (
-              <li key={tax.id} className="lineRow lineRow--compact">
-                <input
-                  type="text"
-                  className="grow"
-                  value={tax.label}
-                  aria-label="Nom de la taxe"
-                  onChange={(event) => patchTax(tax.id, { label: event.target.value })}
-                />
-                <AmountInput
-                  valueCents={tax.amountCents}
-                  onChange={(cents) => patchTax(tax.id, { amountCents: cents ?? 0 })}
-                  allowNegative
-                  aria-label={`Montant de ${tax.label}`}
-                  className="lineRow__total"
-                />
-                <button
-                  type="button"
-                  className="iconButton iconButton--quiet"
-                  aria-label={`Supprimer ${tax.label}`}
-                  onClick={() => removeTax(tax.id)}
-                >
-                  ✕
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-
-      {receipt.adjustments.length > 0 ? (
-        <div className="stack">
-          <h2>Ajustements</h2>
-          <ul className="lines">
-            {receipt.adjustments.map((adjustment) => (
-              <li key={adjustment.id} className="lineRow lineRow--compact">
-                <span>{adjustment.label}</span>
-                <span className="num">{formatCents(adjustment.amountCents)}</span>
-                <button
-                  type="button"
-                  className="iconButton iconButton--quiet"
-                  aria-label={`Supprimer ${adjustment.label}`}
-                  onClick={() =>
-                    updateReceipt((current) => ({
-                      ...current,
-                      adjustments: current.adjustments.filter((a) => a.id !== adjustment.id),
-                    }))
-                  }
-                >
-                  ✕
-                </button>
-              </li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
+      <p className="muted">
+        Les taxes, les remises et l’écart avec le total se règlent à l’étape Ajustements.
+      </p>
 
       <PhotoSheet open={photoOpen} src={imageUrl} onClose={() => setPhotoOpen(false)} />
     </Screen>

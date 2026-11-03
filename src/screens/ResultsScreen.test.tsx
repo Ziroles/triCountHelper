@@ -72,7 +72,7 @@ describe('résultats', () => {
     render(<App />);
     await user.click(await screen.findByText('Colocation'));
     await user.click(await screen.findByText('Chez Victoire'));
-    await screen.findByRole('heading', { name: 'Résultats' });
+    await screen.findByText('Étape 3 sur 3');
     return user;
   }
 
@@ -82,19 +82,19 @@ describe('résultats', () => {
     // 3000 + 1000 + 200 for Mathieu, 1000 + 200 for Léa: nothing is lost.
     expect(screen.getByText(/^42,00/)).toBeInTheDocument();
     expect(screen.getByText(/^12,00/)).toBeInTheDocument();
-    expect(screen.getByText(/1 ligne non attribuée/).textContent).toMatch(
-      /1 ligne non attribuée — 4,00.+partagé entre les 2 participants/,
+    expect(screen.getByText(/1 plat non attribué/).textContent).toMatch(
+      /1 plat non attribué \(4,00\), partagé entre les 2 participants/,
     );
   });
 
   it('distingue à l’icône ce qui est payé seul de ce qui est partagé', async () => {
     const user = await openResults();
 
-    const mathieu = screen.getByRole('button', { name: 'Mathieu' }).closest('li') as HTMLElement;
+    const mathieu = screen.getByRole('button', { name: /^Mathieu/ }).closest('li') as HTMLElement;
+    await user.click(screen.getByRole('button', { name: /^Mathieu/ }));
+
     expect(within(mathieu).getByText(/1 seul$/)).toBeInTheDocument();
     expect(within(mathieu).getByText(/2 partagés$/)).toBeInTheDocument();
-
-    await user.click(screen.getByRole('button', { name: 'Mathieu' }));
 
     expect(within(mathieu).getByTitle('Payé seul')).toBeInTheDocument();
     expect(within(mathieu).getByTitle('Partagé à 2')).toBeInTheDocument();
@@ -104,8 +104,20 @@ describe('résultats', () => {
   it('envoie la dépense vers Tricount avec les uuid des membres, pas leurs noms', async () => {
     const user = await openResults();
 
-    await user.click(screen.getByRole('button', { name: 'Envoyer vers Tricount' }));
-    await screen.findByText('Dépense envoyée. Elle apparaît dans Tricount.');
+    // The payer is chosen before the send: nobody is picked on their behalf.
+    // Picking them from the "send" button sends right after.
+    await user.click(screen.getByRole('button', { name: 'Envoyer à Tricount' }));
+    expect(state.pushed).toHaveLength(0);
+    const sheet = await screen.findByRole('dialog', { name: 'Qui a payé ?' });
+    await user.click(within(sheet).getByRole('button', { name: 'Mathieu' }));
+
+    const done = await screen.findByRole('dialog', { name: 'Dépense envoyée' });
+    expect(within(done).getByText('54,00 $')).toBeInTheDocument();
+    expect(within(done).getByRole('link', { name: 'Ouvrir dans Tricount' })).toHaveAttribute(
+      'href',
+      'https://tricount.com/tTEST123456',
+    );
+    expect(screen.getByRole('button', { name: /Payé par\s*Mathieu/ })).toBeInTheDocument();
 
     const sent = state.pushed[0]?.payload as {
       payerMemberUuid: string;
@@ -119,5 +131,58 @@ describe('résultats', () => {
     ]);
     // The server's guard rail: the shares must add up to the total.
     expect(sent.shares.reduce((sum, share) => sum + share.amountCents, 0)).toBe(sent.totalCents);
+  });
+
+  it('demande confirmation avant de renvoyer une dépense déjà envoyée', async () => {
+    const user = await openResults();
+
+    await user.click(screen.getByRole('button', { name: 'Envoyer à Tricount' }));
+    await user.click(
+      within(await screen.findByRole('dialog', { name: 'Qui a payé ?' })).getByRole('button', {
+        name: 'Léa',
+      }),
+    );
+    await user.click(
+      within(await screen.findByRole('dialog', { name: 'Dépense envoyée' })).getByRole('button', {
+        name: 'Revenir au récap',
+      }),
+    );
+    expect(state.pushed).toHaveLength(1);
+    expect((state.pushed[0]?.payload as { payerMemberUuid: string }).payerMemberUuid).toBe('m-lea');
+
+    // The same expense again: a duplicate in Tricount unless the user insists.
+    await user.click(screen.getByRole('button', { name: 'Renvoyer à Tricount' }));
+    const confirm = await screen.findByRole('dialog', { name: 'Déjà envoyé' });
+    expect(confirm).toHaveTextContent(/créerait un doublon/);
+    await user.click(within(confirm).getByRole('button', { name: 'Annuler' }));
+    expect(state.pushed).toHaveLength(1);
+
+    await user.click(screen.getByRole('button', { name: 'Renvoyer à Tricount' }));
+    await user.click(
+      within(await screen.findByRole('dialog', { name: 'Déjà envoyé' })).getByRole('button', {
+        name: 'Renvoyer',
+      }),
+    );
+    await screen.findByRole('dialog', { name: 'Dépense envoyée' });
+    expect(state.pushed).toHaveLength(2);
+  });
+
+  it('garde le payeur choisi quand on quitte l’écran et qu’on y revient', async () => {
+    const user = await openResults();
+
+    await user.click(screen.getByRole('button', { name: /Payé par/ }));
+    await user.click(
+      within(await screen.findByRole('dialog', { name: 'Qui a payé ?' })).getByRole('button', {
+        name: 'Léa',
+      }),
+    );
+    // Picked from the "Payé par" row, not from "send": nothing goes out.
+    expect(state.pushed).toHaveLength(0);
+
+    await user.click(screen.getByRole('button', { name: 'Retour' }));
+    await screen.findByText('Étape 2 sur 3');
+    await user.click(screen.getByRole('button', { name: 'Continuer' }));
+    await screen.findByText('Étape 3 sur 3');
+    expect(screen.getByRole('button', { name: /Payé par\s*Léa/ })).toBeInTheDocument();
   });
 });

@@ -53,3 +53,22 @@ export function sumCents(values: readonly number[]): number {
   for (const value of values) total += value;
   return total;
 }
+
+const PLAIN = new Intl.NumberFormat('fr-CA', {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+});
+
+/**
+ * Montant sans symbole, au format des listes : `60,39`, `−10,00`.
+ * Le signe est un vrai signe moins (U+2212), pas un tiret.
+ */
+export function formatAmount(cents: number): string {
+  const text = PLAIN.format(Math.abs(cents) / 100);
+  return cents < 0 ? `−${text}` : text;
+}
+
+/** Montant avec symbole, une espace insécable avant le `$` : `238,03 $`. */
+export function formatMoney(cents: number): string {
+  return `${formatAmount(cents)} $`;
+}

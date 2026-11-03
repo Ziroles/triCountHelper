@@ -1,27 +1,100 @@
+/* SplitTicket — design « Classique »
+   Tokens à importer une fois, en racine de l'app. Thème sombre uniquement pour l'instant. */
+
+/* La police Geist est embarquée (@fontsource/geist, importée dans main.tsx)
+   plutôt que chargée depuis Google Fonts : aucun appel externe, et elle reste
+   disponible hors ligne via le cache du service worker. */
+
 :root {
-  --bg: #fafaf9;
-  --surface: #ffffff;
-  --ink: #1a1a1a;
-  --ink-muted: #737373;
-  --line: #e5e5e3;
-  --accent: #1a1a1a;
-  --accent-ink: #fafaf9;
-  --warn: #b45309;
+  /* Couleurs de base */
+  --st-page: #0F1012;          /* fond derrière l'app (desktop / bords) */
+  --st-bg: #17181B;            /* fond des écrans (Graphite) */
+  --st-surface: #202226;       /* cartes, sections, boutons secondaires */
+  --st-line: #2E3035;          /* séparateurs, bordures, piste de progression */
+  --st-text: #ECEAE6;          /* texte principal */
+  --st-text-muted: #C9C6C0;    /* lignes de détail (taxes, remise) */
+  --st-text-2: #9C9A94;        /* texte secondaire, libellés, sous-titres */
+  --st-accent: #EEEAE4;        /* bouton principal, segment actif, progression (Craie) */
+  --st-on-accent: #17181B;     /* texte sur --st-accent */
+  --st-discount: #8FCFA8;      /* montants négatifs (remises) */
+  --st-danger: #E39595;        /* erreurs, suppression */
 
-  /* Six well-separated hues, dark enough to carry light text.
-     Dark mode lightens them further down: text laid on them is then dark. */
-  --person-1: #2563eb;
-  --person-2: #c2410c;
-  --person-3: #15803d;
-  --person-4: #be185d;
-  --person-5: #0e7490;
-  --person-6: #7c3aed;
+  /* Couleurs des convives, attribuées dans l'ordre du groupe Tricount.
+     Toujours du texte --st-bg posé dessus. */
+  --st-p1: #9DB4E8;
+  --st-p2: #E9A982;
+  --st-p3: #8FCFA8;
+  --st-p4: #E7A5C4;
+  --st-p5: #D9C27A;
+  --st-p6: #A9A3E8;
+  --st-p7: #7FC6CF;
+  --st-p8: #E39595;
 
-  --text-xs: 13px;
-  --text-sm: 15px;
-  --text-md: 17px;
-  --text-lg: 22px;
-  --text-xl: 28px;
+  /* Typographie */
+  --st-font: "Geist", system-ui, sans-serif;
+  --st-fs-display: 44px;   /* total à répartir, poids 300, letter-spacing -1px */
+  --st-fs-title: 16px;     /* titre d'écran, poids 600 */
+  --st-fs-body: 15px;      /* lignes de liste, boutons */
+  --st-fs-label: 14px;     /* titres de section (600), lignes de détail */
+  --st-fs-small: 13px;     /* segments, liens */
+  --st-fs-caption: 12px;   /* sous-titres, étape, détail par personne */
+  --st-fs-amount-lg: 18px; /* montants sur l'écran Envoi, poids 500 */
+
+  /* Rayons */
+  --st-r-btn: 12px;        /* boutons, bouton retour */
+  --st-r-card: 16px;       /* sections (.sec) */
+  --st-r-seg: 10px;        /* contrôle segmenté (conteneur) */
+  --st-r-seg-in: 7px;      /* segment actif */
+
+  /* Espacements */
+  --st-pad-screen: 16px;   /* marge latérale */
+  --st-gap-screen: 14px;   /* espace entre blocs d'un écran */
+  --st-pad-card: 12px 14px;
+  --st-row-py: 12px;       /* padding vertical d'une ligne de liste */
+
+  /* Tailles */
+  --st-btn-h: 52px;
+  --st-touch: 44px;        /* cible tactile minimale */
+  --st-avatar: 44px;       /* convives en haut de l'écran Plats */
+  --st-avatar-md: 36px;    /* écran Envoi */
+  --st-avatar-sm: 22px;    /* pastilles sur les lignes de plats */
+}
+
+/* ── Compléments ──────────────────────────────────────────────────────────
+   Absents de la maquette, nécessaires à l'app : à reporter dans le fichier de
+   tokens du design s'il évolue. */
+:root {
+  --st-scrim: rgb(0 0 0 / 55%);  /* voile derrière les feuilles du bas */
+  --st-crop-mask: rgb(0 0 0 / 50%); /* hors du cadre de recadrage photo */
+}
+
+/* ── Alias ────────────────────────────────────────────────────────────────
+   Les écrans de réglages, d'adhésion et d'import parlent encore l'ancien
+   vocabulaire. Plutôt que de dupliquer des valeurs, chaque ancien nom pointe
+   sur un token « Classique » : il n'y a qu'une source de vérité. */
+:root {
+  --bg: var(--st-bg);
+  --surface: var(--st-surface);
+  --ink: var(--st-text);
+  --ink-muted: var(--st-text-2);
+  --line: var(--st-line);
+  --accent: var(--st-accent);
+  --accent-ink: var(--st-on-accent);
+  --warn: var(--st-danger);
+
+  --person-1: var(--st-p1);
+  --person-2: var(--st-p2);
+  --person-3: var(--st-p3);
+  --person-4: var(--st-p4);
+  --person-5: var(--st-p5);
+  --person-6: var(--st-p6);
+  --person-7: var(--st-p7);
+  --person-8: var(--st-p8);
+
+  --text-xs: var(--st-fs-small);
+  --text-sm: var(--st-fs-body);
+  --text-md: var(--st-fs-title);
+  --text-lg: var(--st-fs-amount-lg);
 
   --space-1: 4px;
   --space-2: 8px;
@@ -32,52 +105,16 @@
   --space-8: 32px;
   --space-10: 40px;
 
-  --radius: 8px;
-  --radius-sm: 4px;
-  --touch: 44px;
-  --content-width: 640px;
-  --gutter: 20px;
+  --radius: var(--st-r-btn);
+  --radius-sm: 6px;
+  --touch: var(--st-touch);
+  --content-width: 560px;
+  --gutter: var(--st-pad-screen);
 
   --motion: 150ms;
   --ease: ease-out;
 
-  --font: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-}
+  --font: var(--st-font);
 
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme='light']) {
-    --bg: #121211;
-    --surface: #1a1a19;
-    --ink: #f0efec;
-    --ink-muted: #8f8f8a;
-    --line: #2e2e2c;
-    --accent: #f0efec;
-    --accent-ink: #121211;
-    --warn: #d99a3f;
-
-    --person-1: #8ab4ff;
-    --person-2: #fdb173;
-    --person-3: #7ddba0;
-    --person-4: #f7a3c8;
-    --person-5: #6fd7ea;
-    --person-6: #c3b0fd;
-  }
-}
-
-:root[data-theme='dark'] {
-  --bg: #121211;
-  --surface: #1a1a19;
-  --ink: #f0efec;
-  --ink-muted: #8f8f8a;
-  --line: #2e2e2c;
-  --accent: #f0efec;
-  --accent-ink: #121211;
-  --warn: #d99a3f;
-
-  --person-1: #8ab4ff;
-  --person-2: #fdb173;
-  --person-3: #7ddba0;
-  --person-4: #f7a3c8;
-  --person-5: #6fd7ea;
-  --person-6: #c3b0fd;
+  color-scheme: dark;
 }

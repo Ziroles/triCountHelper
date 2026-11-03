@@ -163,6 +163,14 @@ describe('settle — pourboire', () => {
     expect(tipForPercent(receiptOf(restaurant, [TPS(250), TVQ(499)]), 'total', 18)).toBe(1035);
   });
 
+  it('accepte un taux libre à une décimale, arrondi demi vers le haut', () => {
+    expect(tipForPercent(receiptOf(restaurant), 'subtotal', 22)).toBe(1100);
+    // 12,5 % de 0,04 = 0,005 : arrondi à 0,01.
+    expect(tipForPercent(receiptOf([line('a', 4, [{ personId: 'p1' }])]), 'subtotal', 12.5)).toBe(1);
+    // 14,1 % de 10,35 = 1,45935 : pas d'erreur de virgule flottante.
+    expect(tipForPercent(receiptOf([line('a', 1035, [{ personId: 'p1' }])]), 'subtotal', 14.1)).toBe(146);
+  });
+
   it('se répartit au prorata de ce que chacun a consommé', () => {
     const r = receiptOf(restaurant, [TPS(250), TVQ(499)], { tipCents: 900 });
     const s = settle(r, people);

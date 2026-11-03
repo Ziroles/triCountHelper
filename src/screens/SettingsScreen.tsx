@@ -5,6 +5,7 @@ import { Sheet } from '../ui/Sheet';
 import { useAppStore } from '../store/useAppStore';
 import { clearCache, estimateStorage, forgetEverything } from '../db';
 import * as api from '../api';
+import { PercentInput } from '../ui/PercentInput';
 import { TAX_REGIMES, type TipBasis } from '../types';
 import { hint } from '../lib/crypto';
 import { listModels as listModelsWithKey } from '../lib/gemini';
@@ -19,7 +20,7 @@ function formatBytes(bytes: number): string {
  * Settings.
  *
  * Two kinds of settings live side by side, and the distinction is visible on
- * screen: what belongs to this device (theme, defaults) and what the server
+ * screen: what belongs to this device (defaults) and what the server
  * holds for you (Gemini key, account). The key is never shown again — only a
  * few characters, enough to recognise which one is in place.
  */
@@ -33,6 +34,10 @@ export function SettingsScreen() {
   const updateSettings = useAppStore((s) => s.updateSettings);
   const updateServerSettings = useAppStore((s) => s.updateServerSettings);
   const refreshMe = useAppStore((s) => s.refreshMe);
+  const refreshGroups = useAppStore((s) => s.refreshGroups);
+  const lostAccountEmail = useAppStore((s) => s.lostAccountEmail);
+  const deviceId = useAppStore((s) => s.deviceId);
+  const storagePersisted = useAppStore((s) => s.storagePersisted);
 
   const [keyDraft, setKeyDraft] = useState('');
   const [keyStatus, setKeyStatus] = useState<string | null>(null);
@@ -42,7 +47,7 @@ export function SettingsScreen() {
   const [confirmWipe, setConfirmWipe] = useState(false);
 
   // Optional account.
-  const [email, setEmail] = useState('');
+  const [email, setEmail] = useState(lostAccountEmail ?? '');
   const [password, setPassword] = useState('');
   const [accountStatus, setAccountStatus] = useState<string | null>(null);
 
@@ -242,18 +247,11 @@ export function SettingsScreen() {
         <div className="row row--gap">
           <label className="field field--grow">
             <span className="field__label">Pourboire proposé</span>
-            <select
+            <PercentInput
               value={settings.defaultTipPercent}
-              onChange={(event) =>
-                void updateSettings({ defaultTipPercent: Number(event.target.value) })
-              }
-            >
-              {[0, 10, 15, 18, 20, 25].map((percent) => (
-                <option key={percent} value={percent}>
-                  {percent === 0 ? 'aucun' : `${percent} %`}
-                </option>
-              ))}
-            </select>
+              onChange={(percent) => void updateSettings({ defaultTipPercent: percent ?? 0 })}
+              aria-label="Pourboire proposé"
+            />
           </label>
           <label className="field field--grow">
             <span className="field__label">Calculé sur</span>
@@ -271,23 +269,6 @@ export function SettingsScreen() {
       </section>
 
       <section className="section">
-        <h2>Apparence</h2>
-        <label className="field">
-          <span className="field__label">Thème</span>
-          <select
-            value={settings.theme}
-            onChange={(event) =>
-              void updateSettings({ theme: event.target.value as typeof settings.theme })
-            }
-          >
-            <option value="system">Système</option>
-            <option value="light">Clair</option>
-            <option value="dark">Sombre</option>
-          </select>
-        </label>
-      </section>
-
-      <section className="section">
         <h2>Synchronisation</h2>
         {accountEmail ? (
           <p className="muted">
@@ -297,6 +278,13 @@ export function SettingsScreen() {
           </p>
         ) : (
           <>
+            {lostAccountEmail ? (
+              <p className="warnText" role="alert">
+                Cet appareil était connecté au compte {lostAccountEmail}, mais le navigateur a
+                effacé ses données. Saisissez votre mot de passe pour retrouver vos groupes et
+                votre clé Gemini.
+              </p>
+            ) : null}
             <p className="muted">
               Cet appareil fonctionne sans compte, et c’est suffisant. Un compte ne sert qu’à
               une chose : retrouver vos groupes depuis un autre appareil — ou après avoir
@@ -347,10 +335,11 @@ export function SettingsScreen() {
                   setAccountStatus('…');
                   void api
                     .openSession(email.trim(), password)
-                    .then(() => {
+                    .then(async () => {
                       setPassword('');
                       setAccountStatus(null);
-                      return refreshMe();
+                      // Groups and Gemini key come back with the account.
+                      await Promise.all([refreshMe(), refreshGroups()]);
                     })
                     .catch((error: unknown) =>
                       setAccountStatus(error instanceof Error ? error.message : 'Échec.'),
@@ -364,6 +353,30 @@ export function SettingsScreen() {
             {accountStatus ? <p className="warnText">{accountStatus}</p> : null}
           </>
         )}
+      </section>
+
+      <section className="section" aria-labelledby="sec-session">
+        <h2 id="sec-session">Session</h2>
+        <dl className="facts">
+          <dt>Compte</dt>
+          <dd>{accountEmail ?? 'aucun'}</dd>
+          <dt>Appareil</dt>
+          <dd className="num">{deviceId ? deviceId.slice(0, 8) : 'inconnu'}</dd>
+          <dt>Stockage persistant</dt>
+          <dd>
+            {storagePersisted === true
+              ? 'oui'
+              : storagePersisted === false
+                ? 'non : le navigateur peut effacer les données de l’appli'
+                : 'inconnu'}
+          </dd>
+        </dl>
+        {storagePersisted === false ? (
+          <p className="muted">
+            Sur iPhone, installer l’appli sur l’écran d’accueil la protège mieux. Avec un compte,
+            une session perdue se retrouve avec votre mot de passe.
+          </p>
+        ) : null}
       </section>
 
       <section className="section">

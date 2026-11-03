@@ -1,12 +1,16 @@
 import type { Person } from '../types';
 
+/* Attribuées dans l'ordre du groupe Tricount : la même personne garde la même
+   couleur d'un écran à l'autre. */
 export const PERSON_COLORS = [
-  'var(--person-1)',
-  'var(--person-2)',
-  'var(--person-3)',
-  'var(--person-4)',
-  'var(--person-5)',
-  'var(--person-6)',
+  'var(--st-p1)',
+  'var(--st-p2)',
+  'var(--st-p3)',
+  'var(--st-p4)',
+  'var(--st-p5)',
+  'var(--st-p6)',
+  'var(--st-p7)',
+  'var(--st-p8)',
 ] as const;
 
 export function colorForIndex(index: number): string {

@@ -116,6 +116,17 @@ export type ReceiptStatus = 'draft' | 'settled';
 
 export type ReceiptStep = 'capture' | 'processing' | 'verify' | 'assign' | 'results';
 
+/**
+ * Écran du parcours d'un ticket. `adjust` (étape 2, Ajustements) n'existe que
+ * côté client : l'API n'accepte que les `ReceiptStep`, et l'étape mémorisée sur
+ * le ticket reste alors `assign`.
+ */
+export type FlowStep = ReceiptStep | 'adjust';
+
+export function persistedStep(step: FlowStep): ReceiptStep {
+  return step === 'adjust' ? 'assign' : step;
+}
+
 export type TipBasis = 'subtotal' | 'total';
 
 export type Receipt = {
@@ -165,14 +176,12 @@ export type Settings = {
   taxRegimeCode: string;
   defaultTipPercent: number;
   defaultTipBasis: TipBasis;
-  theme: 'system' | 'light' | 'dark';
 };
 
 export const DEFAULT_SETTINGS: Settings = {
   taxRegimeCode: DEFAULT_REGIME_CODE,
   defaultTipPercent: 18,
   defaultTipBasis: 'subtotal',
-  theme: 'system',
 };
 
 /**

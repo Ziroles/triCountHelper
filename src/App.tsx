@@ -14,15 +14,6 @@ import { SettingsScreen } from './screens/SettingsScreen';
 import { ReceiptFlow } from './screens/ReceiptFlow';
 import { LegacyImport } from './screens/LegacyImport';
 
-function useTheme(): void {
-  const theme = useAppStore((s) => s.settings.theme);
-  useEffect(() => {
-    const root = document.documentElement;
-    if (theme === 'system') root.removeAttribute('data-theme');
-    else root.setAttribute('data-theme', theme);
-  }, [theme]);
-}
-
 function StatusStrip() {
   const online = useAppStore((s) => s.online);
   const contractMismatch = useAppStore((s) => s.contractMismatch);
@@ -89,7 +80,6 @@ export default function App() {
   const ready = useAppStore((s) => s.ready);
   const route = useAppStore((s) => s.route);
   const init = useAppStore((s) => s.init);
-  useTheme();
 
   useEffect(() => {
     void init();

@@ -2,16 +2,25 @@ import { useMemo, useState } from 'react';
 import { Screen } from '../ui/Screen';
 import { Button } from '../ui/Button';
 import { Banner } from '../ui/Banner';
-import { AmountInput } from '../ui/AmountInput';
+import { Sheet } from '../ui/Sheet';
 import { PersonPill } from '../ui/PersonPill';
 import { ShareIcon } from '../ui/ShareIcon';
+import { ChevronRight } from '../ui/Icons';
+import { MenuButton, type MenuItem } from '../ui/MenuSheet';
 import { useAppStore } from '../store/useAppStore';
 import { useGroupPeople } from '../hooks/useGroupPeople';
-import { settle, tipForPercent } from '../lib/compute';
-import { formatCents, formatPercent } from '../lib/money';
-import { buildDetailedText, buildSummaryText, copyText, personAmountText } from '../lib/export';
+import { settle, type PersonTotals } from '../lib/compute';
+import { formatAmount, formatMoney, formatPercent } from '../lib/money';
+import { recall, remember } from '../lib/deviceMemory';
+import {
+  buildDetailedText,
+  buildSummaryText,
+  copyText,
+  personAmountText,
+  receiptHeading,
+} from '../lib/export';
 import { personById } from '../lib/people';
-import { TricountPanel } from '../integrations/tricount/TricountPanel';
+import { tricountUrl, useTricountPush } from '../integrations/tricount/push';
 import type { Receipt } from '../types';
 
 type ResultsScreenProps = {
@@ -20,34 +29,47 @@ type ResultsScreenProps = {
   onHome: () => void;
 };
 
+/** `plats 47,95, remise −2,54, taxes 6,80, pourb. 8,18` */
+function breakdownText(person: PersonTotals): string {
+  const parts = [`plats ${formatAmount(person.linesCents)}`];
+  if (person.adjustmentsCents !== 0) {
+    parts.push(
+      `${person.adjustmentsCents < 0 ? 'remise' : 'suppl.'} ${formatAmount(person.adjustmentsCents)}`,
+    );
+  }
+  parts.push(`taxes ${formatAmount(person.taxesCents)}`);
+  if (person.tipCents !== 0) parts.push(`pourb. ${formatAmount(person.tipCents)}`);
+  return parts.join(', ');
+}
+
+/** Étape 3 — Envoi : la part de chacun, le payeur, puis l'envoi vers Tricount. */
 export function ResultsScreen({ receipt, onBack, onHome }: ResultsScreenProps) {
   const people = useGroupPeople();
+  const group = useAppStore((s) => s.group);
+  const online = useAppStore((s) => s.online);
   const updateReceipt = useAppStore((s) => s.updateReceipt);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
-
-  const settings = useAppStore((s) => s.settings);
-  const settlement = useMemo(() => settle(receipt, people), [receipt, people]);
-
-  const tipChoices = useMemo(
-    () => [...new Set([15, 18, 20, settings.defaultTipPercent])].filter((p) => p > 0).sort((a, b) => a - b),
-    [settings.defaultTipPercent],
-  );
-
-  const setTipPercent = (percent: number) => {
-    updateReceipt((current) => ({
-      ...current,
-      tipCents: tipForPercent(current, current.tipBasis, percent),
-    }));
+  /* The payer is remembered for this receipt on this device: leaving the
+     screen and coming back must not ask again. */
+  const [payer, setPayerState] = useState<string | null>(() => recall(receipt.id).payer ?? null);
+  const setPayer = (id: string) => {
+    remember(receipt.id, { payer: id });
+    setPayerState(id);
   };
+  const [payerOpen, setPayerOpen] = useState(false);
+  /** The payer sheet was opened by "send": picking someone sends right after. */
+  const [sendAfterPayer, setSendAfterPayer] = useState(false);
+  const [confirmResend, setConfirmResend] = useState<string | null>(null);
 
-  const activePercent = (percent: number) =>
-    receipt.tipCents !== 0 &&
-    receipt.tipCents === tipForPercent(receipt, receipt.tipBasis, percent);
+  const settlement = useMemo(() => settle(receipt, people), [receipt, people]);
+  const heading = receiptHeading(receipt, group?.title);
+  const push = useTricountPush(receipt, settlement);
 
   const involved = settlement.people.filter(
     (person) => person.totalCents !== 0 || person.lineCount > 0,
   );
+  const payerPerson = payer ? personById(people, payer) : undefined;
 
   const flash = (key: string) => {
     setCopied(key);
@@ -64,200 +86,297 @@ export function ResultsScreen({ receipt, onBack, onHome }: ResultsScreenProps) {
     if (ok) flash('detail');
   };
 
+  const formatSentAt = (iso: string) =>
+    new Intl.DateTimeFormat('fr-CA', { dateStyle: 'long', timeStyle: 'short' }).format(new Date(iso));
+
+  /* Tricount has no "is this already there?": this device remembers what it
+     sent, and asks before a second expense is created. */
+  const sendAs = (payerId: string) => {
+    if (push.lastSent) {
+      setConfirmResend(payerId);
+      return;
+    }
+    void push.send(payerId);
+  };
+
+  const send = () => {
+    if (!payerPerson) {
+      setSendAfterPayer(true);
+      setPayerOpen(true);
+      return;
+    }
+    sendAs(payerPerson.id);
+  };
+
+  const resendIsSame =
+    push.lastSent !== null && confirmResend !== null
+      ? push.lastSent.fingerprint === push.fingerprint(confirmResend)
+      : false;
+
+  const menu: MenuItem[] = [
+    { label: copied === 'detail' ? 'Détail copié ✓' : 'Copier le détail', onSelect: () => void copyDetail() },
+    {
+      label: receipt.status === 'settled' ? 'Rouvrir le ticket' : 'Marquer comme réglé',
+      onSelect: () => {
+        updateReceipt({ status: receipt.status === 'settled' ? 'draft' : 'settled' });
+        if (receipt.status !== 'settled') onHome();
+      },
+    },
+  ];
+
+  const busy = push.status.kind === 'busy';
+
   return (
     <Screen
-      title="Résultats"
+      title={heading.title}
+      subtitle={heading.subtitle}
       onBack={onBack}
+      action={<MenuButton items={menu} />}
+      step={3}
       banner={
-        settlement.unassignedLineIds.length > 0 ? (
-          <Banner tone="warn">
-            {settlement.unassignedLineIds.length} ligne
-            {settlement.unassignedLineIds.length > 1 ? 's' : ''} sans participant —{' '}
-            <span className="num">{formatCents(settlement.unassignedLinesCents)}</span> hors
-            répartition
-          </Banner>
-        ) : settlement.autoSplitLineIds.length > 0 ? (
-          <Banner>
-            {settlement.autoSplitLineIds.length} ligne
-            {settlement.autoSplitLineIds.length > 1 ? 's' : ''} non attribuée
-            {settlement.autoSplitLineIds.length > 1 ? 's' : ''} —{' '}
-            <span className="num">{formatCents(settlement.autoSplitLinesCents)}</span> partagé
-            {settlement.autoSplitLineIds.length > 1 ? 's' : ''} entre les{' '}
-            {people.length} participants
+        push.status.kind === 'failed' || settlement.unassignedLineIds.length > 0 ? (
+          <>
+            {push.status.kind === 'failed' ? (
+              <Banner tone="warn" label="Envoi impossible">
+                {push.status.message} Le récap reste copiable.
+              </Banner>
+            ) : null}
+            {settlement.unassignedLineIds.length > 0 ? (
+              <Banner tone="warn">
+                {settlement.unassignedLineIds.length} ligne
+                {settlement.unassignedLineIds.length > 1 ? 's' : ''} sans participant :{' '}
+                <span className="num">{formatAmount(settlement.unassignedLinesCents)}</span> hors
+                répartition
+              </Banner>
+            ) : null}
+          </>
+        ) : push.lastSent ? (
+          <Banner label="Déjà envoyé">
+            Envoyé à Tricount le {formatSentAt(push.lastSent.at)}.
           </Banner>
         ) : null
       }
       footer={
         <>
-          <Button variant="primary" full onClick={() => void copySummary()}>
-            {copied === 'summary' ? 'Copié ✓' : 'Copier le récapitulatif'}
+          <Button
+            variant="primary"
+            full
+            disabled={busy || !online || push.shares.length === 0}
+            onClick={send}
+          >
+            {busy ? 'Envoi…' : push.lastSent ? 'Renvoyer à Tricount' : 'Envoyer à Tricount'}
           </Button>
-          <div className="row row--gap">
-            <Button full onClick={() => void copyDetail()}>
-              {copied === 'detail' ? 'Copié ✓' : 'Copier le détail'}
-            </Button>
-            <Button
-              full
-              onClick={() => {
-                updateReceipt({
-                  status: receipt.status === 'settled' ? 'draft' : 'settled',
-                });
-                if (receipt.status !== 'settled') onHome();
-              }}
-            >
-              {receipt.status === 'settled' ? 'Rouvrir' : 'Marquer comme réglé'}
-            </Button>
-          </div>
+          <Button full onClick={() => void copySummary()}>
+            {copied === 'summary' ? 'Récap copié ✓' : 'Copier le récap'}
+          </Button>
         </>
       }
     >
-      <ul className="results">
+      <ul className="payees">
         {involved.map((person) => {
           const identity = personById(people, person.personId);
           if (!identity) return null;
           const open = expanded === person.personId;
           return (
-            <li key={person.personId} className="results__row">
-              <div className="results__head">
-                <PersonPill person={identity} size="sm" />
-                <button
-                  type="button"
-                  className="results__name"
-                  aria-expanded={open}
-                  onClick={() => setExpanded(open ? null : person.personId)}
-                >
-                  {identity.name}
-                </button>
-                <span className="results__amount num">{formatCents(person.totalCents)}</span>
-                <button
-                  type="button"
-                  className="iconButton iconButton--quiet"
-                  aria-label={`Copier le montant de ${identity.name}`}
-                  onClick={() => {
-                    void copyText(personAmountText(person)).then((ok) => {
-                      if (ok) flash(person.personId);
-                    });
-                  }}
-                >
-                  {copied === person.personId ? '✓' : '⧉'}
-                </button>
-              </div>
-              <div className="results__meta">
-                <span>
-                  dont taxes <span className="num">{formatCents(person.taxesCents)}</span>
+            <li key={person.personId} className="payee">
+              <button
+                type="button"
+                className="payee__head"
+                aria-expanded={open}
+                onClick={() => setExpanded(open ? null : person.personId)}
+              >
+                <PersonPill person={identity} size="md" decorative />
+                <span className="payee__main">
+                  <span className="payee__name">{identity.name}</span>
+                  <span className="payee__detail num">{breakdownText(person)}</span>
                 </span>
-                {person.tipCents !== 0 ? (
-                  <span>
-                    pourboire <span className="num">{formatCents(person.tipCents)}</span>
-                  </span>
-                ) : null}
-                <span>
-                  {person.lineCount} article{person.lineCount > 1 ? 's' : ''} ·{' '}
-                  <span className="num">{formatPercent(person.ratio)}</span> du total
-                </span>
-                {person.soloLineCount > 0 ? (
-                  <span className="results__count">
-                    <ShareIcon count={1} decorative />
-                    {person.soloLineCount} seul{person.soloLineCount > 1 ? 's' : ''}
-                  </span>
-                ) : null}
-                {person.sharedLineCount > 0 ? (
-                  <span className="results__count">
-                    <ShareIcon count={2} decorative />
-                    {person.sharedLineCount} partagé{person.sharedLineCount > 1 ? 's' : ''}
-                  </span>
-                ) : null}
-              </div>
+                <span className="payee__amount num">{formatAmount(person.totalCents)}</span>
+              </button>
               {open ? (
-                <ul className="results__detail">
-                  {person.items.map((item, index) => (
-                    <li key={`${item.id}-${index}`}>
-                      <span className="results__item">
-                        {item.kind === 'line' ? (
-                          <ShareIcon count={item.shareCount} auto={item.auto} />
-                        ) : (
-                          <span className="shareIcon shareIcon--none" aria-hidden="true" />
-                        )}
-                        <span className="results__item-text">
-                          {item.description?.trim() || item.label || 'Sans libellé'}
-                          {item.description && item.description.trim() !== item.label.trim() ? (
-                            <span className="results__item-code muted"> ({item.label})</span>
+                <div className="payee__more">
+                  <p className="muted">
+                    {person.lineCount} plat{person.lineCount > 1 ? 's' : ''},{' '}
+                    <span className="num">{formatPercent(person.ratio)}</span> du total
+                    {person.soloLineCount > 0 ? (
+                      <span className="results__count">
+                        {' · '}
+                        <ShareIcon count={1} decorative />
+                        {person.soloLineCount} seul{person.soloLineCount > 1 ? 's' : ''}
+                      </span>
+                    ) : null}
+                    {person.sharedLineCount > 0 ? (
+                      <span className="results__count">
+                        {' · '}
+                        <ShareIcon count={2} decorative />
+                        {person.sharedLineCount} partagé{person.sharedLineCount > 1 ? 's' : ''}
+                      </span>
+                    ) : null}
+                  </p>
+                  <ul className="results__detail">
+                    {person.items.map((item, index) => (
+                      <li key={`${item.id}-${index}`}>
+                        <span className="results__item">
+                          {item.kind === 'line' ? (
+                            <ShareIcon count={item.shareCount} auto={item.auto} />
+                          ) : (
+                            <span className="shareIcon shareIcon--none" aria-hidden="true" />
+                          )}
+                          <span className="results__item-text">
+                            {item.description?.trim() || item.label || 'Sans libellé'}
+                          </span>
+                          {item.kind === 'line' && item.shareCount > 1 ? (
+                            <span className="results__shareCount num">÷{item.shareCount}</span>
                           ) : null}
                         </span>
-                        {item.kind === 'line' && item.shareCount > 1 ? (
-                          <span className="results__shareCount num">÷{item.shareCount}</span>
-                        ) : null}
-                      </span>
-                      <span className="num">{formatCents(item.amountCents)}</span>
-                    </li>
-                  ))}
-                </ul>
+                        <span className="num">{formatAmount(item.amountCents)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                  <button
+                    type="button"
+                    className="linkButton"
+                    onClick={() => {
+                      void copyText(personAmountText(person)).then((ok) => {
+                        if (ok) flash(person.personId);
+                      });
+                    }}
+                  >
+                    {copied === person.personId ? 'Montant copié ✓' : `Copier le montant de ${identity.name}`}
+                  </button>
+                </div>
               ) : null}
             </li>
           );
         })}
+        <li className="payee payee--total">
+          <span className="payee__main payee__name--muted">Total</span>
+          <span className="payee__amount num">{formatMoney(settlement.distributedTotalCents)}</span>
+        </li>
       </ul>
 
-      <div className="results__total">
-        <span>Total</span>
-        <span className="num">{formatCents(settlement.distributedTotalCents)}</span>
-      </div>
+      {settlement.autoSplitLineIds.length > 0 ? (
+        <p className="muted">
+          {settlement.autoSplitLineIds.length} plat
+          {settlement.autoSplitLineIds.length > 1 ? 's' : ''} non attribué
+          {settlement.autoSplitLineIds.length > 1 ? 's' : ''} (
+          <span className="num">{formatAmount(settlement.autoSplitLinesCents)}</span>), partagé
+          {settlement.autoSplitLineIds.length > 1 ? 's' : ''} entre les {people.length}{' '}
+          participants.
+        </p>
+      ) : null}
 
-      <section className="section">
-        <div className="row row--between">
-          <h2>Pourboire</h2>
-          <span className="num">{formatCents(settlement.tipCents)}</span>
-        </div>
-        <div className="row row--gap">
-          {tipChoices.map((percent) => (
-            <Button
-              key={percent}
-              full
-              variant={activePercent(percent) ? 'primary' : 'secondary'}
-              onClick={() => setTipPercent(percent)}
-            >
-              {percent} %
-            </Button>
+      <button type="button" className="sec sec--row" onClick={() => setPayerOpen(true)}>
+        <span className="sec__rowLabel">Payé par</span>
+        <span className={`sec__rowValue${payerPerson ? '' : ' sec__rowValue--empty'}`}>
+          {payerPerson ? payerPerson.name : 'À choisir'}
+          <ChevronRight />
+        </span>
+      </button>
+
+      <Sheet
+        open={payerOpen}
+        title="Qui a payé ?"
+        onClose={() => {
+          setPayerOpen(false);
+          setSendAfterPayer(false);
+        }}
+      >
+        <p className="muted">
+          La dépense sera créée dans Tricount au nom de cette personne
+          {sendAfterPayer ? ', et envoyée aussitôt.' : '.'}
+        </p>
+        <ul className="choices">
+          {people.map((person) => (
+            <li key={person.id}>
+              <button
+                type="button"
+                className={`choice${person.id === payer ? ' choice--on' : ''}`}
+                aria-pressed={person.id === payer}
+                onClick={() => {
+                  setPayer(person.id);
+                  setPayerOpen(false);
+                  if (sendAfterPayer) {
+                    setSendAfterPayer(false);
+                    sendAs(person.id);
+                  }
+                }}
+              >
+                <PersonPill person={person} size="md" decorative />
+                <span className="choice__name">{person.name}</span>
+                {person.id === payer ? <span aria-hidden="true">✓</span> : null}
+              </button>
+            </li>
           ))}
-          <Button
-            full
-            variant={receipt.tipCents === 0 ? 'primary' : 'secondary'}
-            onClick={() => updateReceipt({ tipCents: 0 })}
-          >
-            Aucun
-          </Button>
-        </div>
-        <div className="row row--gap">
-          <label className="field field--grow">
-            <span className="field__label">Montant libre</span>
-            <AmountInput
-              valueCents={receipt.tipCents}
-              onChange={(cents) => updateReceipt({ tipCents: cents ?? 0 })}
-              aria-label="Montant du pourboire"
-            />
-          </label>
-          <label className="field field--grow">
-            <span className="field__label">Calculé sur</span>
-            <select
-              value={receipt.tipBasis}
-              aria-label="Base de calcul du pourboire"
-              onChange={(event) => {
-                const tipBasis = event.target.value as typeof receipt.tipBasis;
-                updateReceipt((current) => ({ ...current, tipBasis }));
+        </ul>
+      </Sheet>
+
+      <Sheet
+        open={confirmResend !== null}
+        title="Déjà envoyé"
+        onClose={() => setConfirmResend(null)}
+        footer={
+          <div className="row row--gap">
+            <Button full onClick={() => setConfirmResend(null)}>
+              Annuler
+            </Button>
+            <Button
+              variant="primary"
+              full
+              onClick={() => {
+                const target = confirmResend;
+                setConfirmResend(null);
+                if (target) void push.send(target);
               }}
             >
-              <option value="subtotal">le sous-total avant taxes</option>
-              <option value="total">le total, taxes comprises</option>
-            </select>
-          </label>
-        </div>
-        <p className="muted">
-          Le pourboire ne figure pas sur le ticket : il s’ajoute au total réparti sans entrer
-          dans le contrôle du montant imprimé.
-        </p>
-      </section>
+              Renvoyer
+            </Button>
+          </div>
+        }
+      >
+        {push.lastSent ? (
+          <p className="muted">
+            {resendIsSame
+              ? `Cette dépense a déjà été envoyée le ${formatSentAt(push.lastSent.at)}. La renvoyer créerait un doublon dans Tricount.`
+              : `Une version précédente de ce ticket a été envoyée le ${formatSentAt(push.lastSent.at)}. Elle reste dans Tricount : supprimez-la là-bas pour éviter un doublon.`}
+          </p>
+        ) : null}
+      </Sheet>
 
-      <TricountPanel receipt={receipt} settlement={settlement} />
+      <Sheet
+        open={push.status.kind === 'done'}
+        title="Dépense envoyée"
+        onClose={push.reset}
+        footer={
+          <div className="stack">
+            <Button variant="primary" full onClick={onHome}>
+              Terminer
+            </Button>
+            <Button full onClick={push.reset}>
+              Revenir au récap
+            </Button>
+          </div>
+        }
+      >
+        {push.status.kind === 'done' ? (
+          <div className="sent">
+            <span className="sent__amount num">{formatMoney(push.status.totalCents)}</span>
+            <p className="muted">
+              {heading.title}, payé par {personById(people, push.status.payer)?.name ?? '—'}. La
+              dépense apparaît dans Tricount.
+            </p>
+            {receipt.groupId ? (
+              <a
+                className="linkButton"
+                href={tricountUrl(receipt.groupId)}
+                target="_blank"
+                rel="noreferrer"
+              >
+                Ouvrir dans Tricount
+              </a>
+            ) : null}
+          </div>
+        ) : null}
+      </Sheet>
     </Screen>
   );
 }

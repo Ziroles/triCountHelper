@@ -25,6 +25,7 @@ import { ApiError, OfflineError } from '../api';
 import * as db from '../db';
 import { newDeviceKek, open as openSealed, seal } from '../lib/crypto';
 import { logger } from '../lib/log';
+import { knownAccountEmail, rememberAccountEmail, requestPersistentStorage } from '../lib/session';
 import { colorForIndex } from '../lib/people';
 import { currentRoute, routeToPath } from '../lib/routing';
 import {
@@ -34,7 +35,7 @@ import {
   type GroupSummary,
   type Person,
   type Receipt,
-  type ReceiptStep,
+  type FlowStep,
   type ReceiptSummary,
   type ServerSettings,
   type Settings,
@@ -45,7 +46,7 @@ export type Route =
   | { name: 'join' }
   | { name: 'settings' }
   | { name: 'group'; groupId: string }
-  | { name: 'receipt'; groupId: string; receiptId: string; step: ReceiptStep };
+  | { name: 'receipt'; groupId: string; receiptId: string; step: FlowStep };
 
 export type SaveState = 'idle' | 'saving' | 'offline' | 'error' | 'conflict';
 
@@ -65,6 +66,14 @@ type State = {
    */
   geminiKey: string | null;
   accountEmail: string | null;
+  /**
+   * The account this device was signed in to, when the server no longer ties
+   * it to one: the session was lost (cleared storage) and must be reopened.
+   */
+  lostAccountEmail: string | null;
+  deviceId: string | null;
+  /** Whether the browser agreed to keep our storage; null when unknown. */
+  storagePersisted: boolean | null;
 
   groups: GroupSummary[];
   group: Group | null;
@@ -113,6 +122,8 @@ type Actions = {
     geminiModel?: string;
   }) => Promise<void>;
   refreshMe: () => Promise<void>;
+  /** "Continue without an account": stop asking to sign in again. */
+  dismissLostAccount: () => void;
 };
 
 export type AppStore = State & Actions;
@@ -313,6 +324,9 @@ export const useAppStore = create<AppStore>((set, get) => {
     server: DEFAULT_SERVER_SETTINGS,
     geminiKey: null,
     accountEmail: null,
+    lostAccountEmail: null,
+    deviceId: null,
+    storagePersisted: null,
 
     groups: [],
     group: null,
@@ -395,6 +409,8 @@ export const useAppStore = create<AppStore>((set, get) => {
             set({ contractMismatch: mismatch });
           })
           .catch((error) => log.warn('/health unreachable — the network, probably', error));
+
+        void requestPersistentStorage().then((storagePersisted) => set({ storagePersisted }));
 
         // A key kept on this device alone needs no network: usable even if /me fails.
         set({ geminiKey: await openLocalKey() });
@@ -638,6 +654,11 @@ export const useAppStore = create<AppStore>((set, get) => {
       set({ server, geminiKey });
     },
 
+    dismissLostAccount() {
+      rememberAccountEmail(null);
+      set({ lostAccountEmail: null });
+    },
+
     async refreshMe() {
       try {
         const me = await api.me();
@@ -658,7 +679,20 @@ export const useAppStore = create<AppStore>((set, get) => {
             }
           }
         }
-        set({ server, geminiKey, accountEmail: me.accountEmail });
+        /* Signed in: remember the address outside IndexedDB. Not signed in while
+           an address is remembered: the session was lost, not closed. */
+        if (me.accountEmail !== null) rememberAccountEmail(me.accountEmail);
+        const lostAccountEmail = me.accountEmail === null ? knownAccountEmail() : null;
+        if (lostAccountEmail !== null && get().lostAccountEmail === null) {
+          log.warn('session lost: this device is no longer signed in to its account');
+        }
+        set({
+          server,
+          geminiKey,
+          accountEmail: me.accountEmail,
+          deviceId: me.deviceId,
+          lostAccountEmail,
+        });
       } catch (error) {
         log.debug('server settings unavailable, keeping the previous ones', error);
         // With no network we keep what we knew: server settings do not block

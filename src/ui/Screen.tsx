@@ -1,29 +1,38 @@
 import type { ReactNode } from 'react';
+import { ChevronLeft } from './Icons';
+import { StepIndicator, type StepNumber } from './StepIndicator';
 
 type ScreenProps = {
   title: string;
-  onBack?: () => void;
-  action?: ReactNode;
+  /** Sous le titre : `groupe, date` sur les écrans d'un ticket. */
   subtitle?: ReactNode;
+  onBack?: () => void;
+  /** À droite de l'en-tête : un lien, ou le bouton « ⋯ ». */
+  action?: ReactNode;
+  /** Étape du parcours d'un ticket, affichée sous l'en-tête. */
+  step?: StepNumber;
   banner?: ReactNode;
   footer?: ReactNode;
   children: ReactNode;
 };
 
-export function Screen({ title, onBack, action, subtitle, banner, footer, children }: ScreenProps) {
+export function Screen({ title, subtitle, onBack, action, step, banner, footer, children }: ScreenProps) {
   return (
     <div className="screen">
       <header className="screen__head">
         <div className="screen__headRow">
           {onBack ? (
-            <button type="button" className="iconButton" onClick={onBack} aria-label="Retour">
-              ←
+            <button type="button" className="backButton" onClick={onBack} aria-label="Retour">
+              <ChevronLeft />
             </button>
           ) : null}
-          <h1 className="screen__title">{title}</h1>
+          <div className="screen__titles">
+            <h1 className="screen__title">{title}</h1>
+            {subtitle ? <p className="screen__subtitle">{subtitle}</p> : null}
+          </div>
           {action ? <div className="screen__action">{action}</div> : null}
         </div>
-        {subtitle ? <p className="screen__subtitle">{subtitle}</p> : null}
+        {step ? <StepIndicator step={step} /> : null}
       </header>
 
       <main className="screen__body">{children}</main>

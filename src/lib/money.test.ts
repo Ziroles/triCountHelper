@@ -54,3 +54,13 @@ describe('formatCents', () => {
     expect(normalized(-250)).toBe('-2,50 $');
   });
 });
+
+describe('formatAmount', () => {
+  it('écrit les montants à la française, avec un vrai signe moins', async () => {
+    const { formatAmount, formatMoney } = await import('./money');
+    expect(formatAmount(6039)).toBe('60,39');
+    expect(formatAmount(-1000)).toBe('−10,00');
+    expect(formatAmount(123456).replace(/\s/g, ' ')).toBe('1 234,56');
+    expect(formatMoney(23803)).toBe('238,03 $');
+  });
+});
