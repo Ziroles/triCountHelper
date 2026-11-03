@@ -4,7 +4,6 @@ import { Banner } from '../ui/Banner';
 import { Button } from '../ui/Button';
 import { Sheet } from '../ui/Sheet';
 import { persistedStep, type FlowStep } from '../types';
-import { useGroupPeople } from '../hooks/useGroupPeople';
 import { recall } from '../lib/deviceMemory';
 import { reconcile } from '../lib/reconcile';
 import { CaptureScreen } from './CaptureScreen';
@@ -110,16 +109,15 @@ export function ReceiptFlow({ groupId, receiptId, step }: ReceiptFlowProps) {
     }
   }, [receipt, receiptId, step, updateReceipt]);
 
-  /* Amounts that follow a remembered intention — a tip picked as a
-     percentage, a discount on some dishes — are brought back in line whenever
-     the receipt changes, whatever the screen: a line corrected in the editor
-     moves the tip, a dish handed to someone else moves its discount. */
-  const people = useGroupPeople();
+  /* What this device remembers is brought back in line whenever the receipt
+     changes, whatever the screen: a tip picked as a percentage follows its
+     base, and a discount on some dishes chosen before the API kept them is
+     handed over to the receipt. */
   useEffect(() => {
     if (!receipt || receipt.id !== receiptId) return;
-    const next = reconcile(receipt, people, recall(receipt.id));
+    const next = reconcile(receipt, recall(receipt.id));
     if (next) updateReceipt(next);
-  }, [receipt, receiptId, people, updateReceipt]);
+  }, [receipt, receiptId, updateReceipt]);
 
   /* Where the user came from: the line editor opens from the dishes and the
      adjustments steps as well as after a manual entry, and both "back" and

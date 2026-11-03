@@ -1,10 +1,9 @@
 /**
  * What this device remembers about a receipt, beyond what the API stores.
  *
- * The API only keeps the receipt document: amounts, not intentions. A tip
- * picked "at 18 %", a discount "on these dishes", taxes computed from their
- * rate, the payer picked, an expense already sent — none of these fit its
- * schema. They live here, in the browser, as conveniences: losing them (private
+ * The API keeps the receipt document, and few intentions: a discount "on these
+ * dishes" travels with it now, but a tip picked "at 18 %", taxes computed from
+ * their rate, the payer picked, an expense already sent do not fit its schema. They live here, in the browser, as conveniences: losing them (private
  * window, cleared storage, another device) must never change an amount, only
  * bring back the more manual behaviour.
  *
@@ -16,9 +15,9 @@ const PREFIX = 'splitticket:';
 type ReceiptMemory = {
   /** Tip percentage the user picked; the amount follows it when the base changes. */
   tipPercent?: number;
-  /** Adjustment id → ids of the dishes it applies to. */
+  /** Legacy, before the API kept them: adjustment id → ids of its dishes. */
   dishes?: Record<string, string[]>;
-  /** Adjustment id → how its discount is shared; absent means prorata. */
+  /** Legacy: adjustment id → how its discount is shared; absent means prorata. */
   dishSplit?: Record<string, 'prorata' | 'equal'>;
   /** Ids of taxes computed from a rate rather than read on the receipt. */
   computedTaxes?: string[];

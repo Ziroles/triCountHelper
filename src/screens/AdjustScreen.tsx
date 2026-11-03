@@ -9,7 +9,7 @@ import { useAppStore } from '../store/useAppStore';
 import { useGroupPeople } from '../hooks/useGroupPeople';
 import { appliesTo, settle, tipForPercent } from '../lib/compute';
 import { recall, remember } from '../lib/deviceMemory';
-import { assignmentsForDishes, remainingDishes, type DishSplit } from '../lib/reconcile';
+import { remainingDishes, type DishSplit } from '../lib/reconcile';
 import { formatAmount, formatMoney, roundHalfUp } from '../lib/money';
 import { receiptHeading } from '../lib/export';
 import { personById } from '../lib/people';
@@ -136,6 +136,7 @@ export function AdjustScreen({ receipt, onBack, onEditLines, onDone }: AdjustScr
       adjustments: current.adjustments.map((a) => (a.id === id ? { ...a, ...patch } : a)),
     }));
 
+  /* Legacy: the dishes of a discount chosen before the API kept them. */
   const forgetDishes = (id: string) => {
     if (!memory.dishes?.[id] && !memory.dishSplit?.[id]) return;
     const without = <T,>(record: Record<string, T> | undefined) =>
@@ -312,24 +313,28 @@ export function AdjustScreen({ receipt, onBack, onEditLines, onDone }: AdjustScr
           <p className="sec__note">Aucune remise.</p>
         ) : (
           receipt.adjustments.map((adjustment) => {
-            const mode: DiscountMode = adjustment.mode === 'assigned' ? 'dishes' : 'proportional';
-            const targets = adjustment.assignments
-              .map((a) => personById(people, a.personId)?.name)
+            const mode: DiscountMode = adjustment.mode === 'proportional' ? 'proportional' : 'dishes';
+            /* Who bears it, as computed: a discount on some dishes follows
+               who has them, on every device. */
+            const targets = settlement.people
+              .filter((entry) =>
+                entry.items.some((item) => item.kind === 'adjustment' && item.id === adjustment.id),
+              )
+              .map((entry) => personById(people, entry.personId)?.name)
               .filter(Boolean)
               .join(', ');
-            const remembered = memory.dishes?.[adjustment.id];
-            const equal = memory.dishSplit?.[adjustment.id] === 'equal';
-            const dishes = remainingDishes(receipt, remembered);
-            /* Chosen on another device, or its dishes deleted since: the split
-               no longer follows the dishes, and the user must know it. */
+            const equal = adjustment.split === 'equal';
+            const dishes =
+              adjustment.mode === 'lines' ? remainingDishes(receipt, adjustment.lineIds) : [];
+            /* Its dishes deleted since, or chosen on a device that has not
+               handed them over yet: the user must know the split no longer
+               follows the dishes. */
             const dishesNote =
-              mode !== 'dishes'
-                ? null
-                : remembered === undefined
-                  ? 'plats choisis sur un autre appareil : à refaire s’ils ont changé'
-                  : dishes.length === 0
-                    ? 'les plats choisis n’existent plus : choisissez-les à nouveau'
-                    : null;
+              adjustment.mode === 'assigned'
+                ? 'plats choisis sur un autre appareil : à refaire s’ils ont changé'
+                : adjustment.mode === 'lines' && dishes.length === 0
+                  ? 'les plats choisis n’existent plus : répartie au prorata, choisissez-les à nouveau'
+                  : null;
             return (
               <div key={adjustment.id} className="sec__group">
                 <button
@@ -370,7 +375,12 @@ export function AdjustScreen({ receipt, onBack, onEditLines, onDone }: AdjustScr
                       return;
                     }
                     forgetDishes(adjustment.id);
-                    patchAdjustment(adjustment.id, { mode: 'proportional', assignments: [] });
+                    patchAdjustment(adjustment.id, {
+                      mode: 'proportional',
+                      assignments: [],
+                      lineIds: undefined,
+                      split: undefined,
+                    });
                   }}
                 />
               </div>
@@ -501,19 +511,19 @@ export function AdjustScreen({ receipt, onBack, onEditLines, onDone }: AdjustScr
       <DishesSheet
         adjustment={dishesSheet}
         lines={receipt.lines}
-        initial={dishesSheet ? remainingDishes(receipt, memory.dishes?.[dishesSheet.id]).map((l) => l.id) : []}
-        initialSplit={(dishesSheet && memory.dishSplit?.[dishesSheet.id]) || 'prorata'}
+        initial={dishesSheet ? remainingDishes(receipt, dishesSheet.lineIds).map((l) => l.id) : []}
+        initialSplit={dishesSheet?.split ?? 'prorata'}
         canSplit={people.length > 0}
         onClose={() => setDishesFor(null)}
         onApply={(lines, split) => {
-          if (!dishesSheet) return;
-          const assignments = assignmentsForDishes(lines, people, split);
-          if (assignments.length === 0) return;
-          note({
-            dishes: { ...memory.dishes, [dishesSheet.id]: lines.map((line) => line.id) },
-            dishSplit: { ...memory.dishSplit, [dishesSheet.id]: split },
+          if (!dishesSheet || lines.length === 0 || people.length === 0) return;
+          forgetDishes(dishesSheet.id);
+          patchAdjustment(dishesSheet.id, {
+            mode: 'lines',
+            assignments: [],
+            lineIds: lines.map((line) => line.id),
+            split,
           });
-          patchAdjustment(dishesSheet.id, { mode: 'assigned', assignments });
           setDishesFor(null);
         }}
       />
@@ -608,6 +618,7 @@ function AdjustmentForm({
   const save = () => {
     const signed = negative ? -Math.abs(amount) : Math.abs(amount);
     onSave({
+      ...adjustment,
       id: adjustment?.id ?? uid(),
       label: label.trim() || (negative ? 'Remise' : 'Supplément'),
       amountCents: signed,

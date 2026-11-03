@@ -229,6 +229,69 @@ describe('settle — ajustements', () => {
   });
 });
 
+describe('settle — remise sur des plats', () => {
+  const discount = (patch: Partial<Adjustment>): Adjustment => ({
+    id: 'r1',
+    label: 'Remise',
+    amountCents: -600,
+    mode: 'lines',
+    assignments: [],
+    lineIds: ['plateau'],
+    ...patch,
+  });
+  // Plateau 30,00 : p1 deux parts, p2 une ; p3 n'a qu'un dessert.
+  const lines = [
+    line('plateau', 3000, [{ personId: 'p1', shares: 2 }, { personId: 'p2' }]),
+    line('dessert', 800, [{ personId: 'p3' }]),
+  ];
+
+  it('au prorata de la part de chacun sur ces plats', () => {
+    const s = settle(receiptOf(lines, [], { adjustments: [discount({})] }), people);
+    expect(s.people.map((p) => p.adjustmentsCents)).toEqual([-400, -200, 0]);
+    expect(s.people.map((p) => p.totalCents)).toEqual([1600, 800, 800]);
+  });
+
+  it('à parts égales entre les personnes de ces plats', () => {
+    const s = settle(
+      receiptOf(lines, [], { adjustments: [discount({ split: 'equal' })] }),
+      people,
+    );
+    expect(s.people.map((p) => p.adjustmentsCents)).toEqual([-300, -300, 0]);
+  });
+
+  it('suit un plat que personne n’a pris : partagé entre tous', () => {
+    const s = settle(
+      receiptOf([line('plateau', 3000, []), lines[1] as ReceiptLine], [], {
+        adjustments: [discount({ split: 'equal' })],
+      }),
+      people,
+    );
+    expect(s.people.map((p) => p.adjustmentsCents)).toEqual([-200, -200, -200]);
+  });
+
+  it('garde les centimes : 10,00 en trois parts égales', () => {
+    const s = settle(
+      receiptOf(
+        [line('plateau', 3000, [{ personId: 'p1' }, { personId: 'p2' }, { personId: 'p3' }])],
+        [],
+        { adjustments: [discount({ amountCents: -1000, split: 'equal' })] },
+      ),
+      people,
+    );
+    expect(sumCents(s.people.map((p) => p.adjustmentsCents))).toBe(-1000);
+    expect(s.people.map((p) => p.adjustmentsCents).sort()).toEqual([-333, -333, -334]);
+  });
+
+  it('retombe au prorata de tous quand ses plats ont disparu', () => {
+    const s = settle(
+      receiptOf(lines, [], { adjustments: [discount({ lineIds: ['supprimé'] })] }),
+      people,
+    );
+    expect(sumCents(s.people.map((p) => p.adjustmentsCents))).toBe(-600);
+    expect(s.people.every((p) => p.adjustmentsCents < 0)).toBe(true);
+  });
+});
+
 describe('settle — lignes non attribuées', () => {
   it('les partage à parts égales entre tous les participants', () => {
     const r = receiptOf([line('l1', 900, [{ personId: 'p1' }]), line('l2', 600, [])]);
@@ -304,6 +367,18 @@ describe('settle — 50 tickets aléatoires', () => {
           amountCents: Math.floor(rand() * 800) - 400,
           mode: rand() > 0.4 ? 'proportional' : 'assigned',
           assignments: [{ personId: crowd[0]?.id as string, shares: 1 }],
+        });
+      }
+      if (rand() > 0.5) {
+        adjustments.push({
+          id: 'a1',
+          label: 'Remise sur des plats',
+          amountCents: -Math.floor(rand() * 1500),
+          mode: 'lines',
+          assignments: [],
+          // Some ids may be gone: the discount then falls back to prorata.
+          lineIds: [`l${Math.floor(rand() * 12)}`, `l${Math.floor(rand() * 12)}`],
+          split: rand() > 0.5 ? 'equal' : 'prorata',
         });
       }
       const tipCents = rand() > 0.5 ? Math.floor(rand() * 2000) : 0;

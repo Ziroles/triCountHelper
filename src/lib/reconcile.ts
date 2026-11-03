@@ -1,65 +1,50 @@
-import { settle, tipForPercent } from './compute';
-import type { Assignment, Person, Receipt, ReceiptLine } from '../types';
+import { tipForPercent } from './compute';
+import type { Adjustment, DiscountSplit, Receipt, ReceiptLine } from '../types';
 
 /** How a discount on some dishes is shared between the people of those dishes. */
-export type DishSplit = 'prorata' | 'equal';
-
-/**
- * A discount "on some dishes" is kept as an adjustment assigned to people:
- * in proportion to what each one has on those dishes, or one equal share for
- * everyone on at least one of them. The API only knows two
- * modes — prorata and assigned — and would drop a list of dishes: the document
- * stores the result of the choice, and this device remembers the choice itself
- * (see `deviceMemory`) to keep the result up to date.
- */
-export function assignmentsForDishes(
-  lines: readonly ReceiptLine[],
-  people: readonly Person[],
-  split: DishSplit = 'prorata',
-): Assignment[] {
-  const onDishes = settle(
-    {
-      lines: [...lines],
-      taxes: [],
-      adjustments: [],
-      statedTotalCents: null,
-      tipCents: 0,
-      tipBasis: 'subtotal',
-    },
-    people,
-  );
-  return onDishes.people
-    .filter((entry) => entry.linesCents > 0)
-    .map((entry) => ({
-      personId: entry.personId,
-      shares: split === 'equal' ? 1 : entry.linesCents,
-    }));
-}
-
-function sameAssignments(a: readonly Assignment[], b: readonly Assignment[]): boolean {
-  return (
-    a.length === b.length &&
-    a.every((item, i) => item.personId === b[i]?.personId && item.shares === b[i]?.shares)
-  );
-}
+export type DishSplit = DiscountSplit;
 
 export type Intentions = {
   tipPercent?: number | undefined;
+  /** Legacy: dishes of a discount written before the API kept them. */
   dishes?: Record<string, string[]> | undefined;
   dishSplit?: Record<string, DishSplit> | undefined;
 };
 
 /**
- * Brings the amounts that follow a remembered intention back in line with the
- * receipt: a tip picked as a percentage follows its base, a discount on some
- * dishes follows who has those dishes. Returns null when nothing has to change,
- * so callers write nothing — and a write cannot trigger another one.
+ * A discount on some dishes used to be stored as an `assigned` adjustment,
+ * its dishes kept on the device that chose them. The API now keeps the dishes
+ * themselves (mode `lines`): the device that remembers them hands them over,
+ * once, and every device then follows the dishes.
  */
-export function reconcile(
-  receipt: Receipt,
-  people: readonly Person[],
+function upgradeDishDiscount(
+  adjustment: Adjustment,
+  lines: readonly ReceiptLine[],
   intentions: Intentions,
-): Receipt | null {
+): Adjustment {
+  const ids = intentions.dishes?.[adjustment.id];
+  if (adjustment.mode !== 'assigned' || !ids) return adjustment;
+  const lineIds = ids.filter((id) => lines.some((line) => line.id === id));
+  // Its dishes are gone: the stored split is all that is left of the choice.
+  if (lineIds.length === 0) return adjustment;
+  return {
+    ...adjustment,
+    mode: 'lines',
+    assignments: [],
+    lineIds,
+    split: intentions.dishSplit?.[adjustment.id] ?? 'prorata',
+  };
+}
+
+/**
+ * Brings the receipt in line with what this device remembers: a tip picked as
+ * a percentage follows its base, a discount on some dishes chosen before the
+ * API kept them is handed over. Returns null when nothing has to change, so
+ * callers write nothing — and a write cannot trigger another one.
+ *
+ * A discount in mode `lines` needs nothing here: `settle` follows its dishes.
+ */
+export function reconcile(receipt: Receipt, intentions: Intentions): Receipt | null {
   let next = receipt;
 
   if (intentions.tipPercent !== undefined) {
@@ -67,29 +52,19 @@ export function reconcile(
     if (tipCents !== receipt.tipCents) next = { ...next, tipCents };
   }
 
-  const dishes = intentions.dishes ?? {};
-  if (people.length > 0 && Object.keys(dishes).length > 0) {
-    let changed = false;
-    const adjustments = next.adjustments.map((adjustment) => {
-      const ids = dishes[adjustment.id];
-      if (adjustment.mode !== 'assigned' || !ids) return adjustment;
-      const lines = next.lines.filter((line) => ids.includes(line.id));
-      if (lines.length === 0) return adjustment;
-      const split = intentions.dishSplit?.[adjustment.id] ?? 'prorata';
-      const assignments = assignmentsForDishes(lines, people, split);
-      if (assignments.length === 0 || sameAssignments(assignments, adjustment.assignments)) {
-        return adjustment;
-      }
-      changed = true;
-      return { ...adjustment, assignments };
-    });
-    if (changed) next = { ...next, adjustments };
+  if (intentions.dishes && Object.keys(intentions.dishes).length > 0) {
+    const adjustments = next.adjustments.map((adjustment) =>
+      upgradeDishDiscount(adjustment, next.lines, intentions),
+    );
+    if (adjustments.some((adjustment, i) => adjustment !== next.adjustments[i])) {
+      next = { ...next, adjustments };
+    }
   }
 
   return next === receipt ? null : next;
 }
 
-/** The dishes a remembered discount applies to and that still exist. */
+/** The dishes a discount applies to and that still exist. */
 export function remainingDishes(receipt: Receipt, ids: readonly string[] | undefined): ReceiptLine[] {
   if (!ids) return [];
   return receipt.lines.filter((line) => ids.includes(line.id));
