@@ -14,7 +14,7 @@
  * The translation fits in this file, and in this file only.
  */
 
-import type { Adjustment, Assignment, Receipt, ReceiptLine } from '../types';
+import type { Adjustment, Assignment, Receipt, ReceiptLine, SuggestedLine } from '../types';
 
 type WireAssignment = { memberUuid: string; shares: number };
 
@@ -46,6 +46,21 @@ export function toWire(receipt: Receipt): WireReceipt {
     })),
   };
 }
+
+type WireSuggestions = {
+  lines: (Omit<SuggestedLine, 'assignments'> & { assignments: WireAssignment[] })[];
+  receiptCount: number;
+};
+
+/** Suggested assignments → the domain's vocabulary. */
+export function suggestionsFromWire(wire: WireSuggestions): SuggestedLine[] {
+  return (wire.lines ?? []).map((line) => ({
+    ...line,
+    assignments: fromWireAssignments(line.assignments),
+  }));
+}
+
+export type { WireSuggestions };
 
 /** API response → domain receipt. */
 export function fromWire(wire: WireReceipt): Receipt {

@@ -28,6 +28,7 @@ import { logger } from '../lib/log';
 import { knownAccountEmail, rememberAccountEmail, requestPersistentStorage } from '../lib/session';
 import { colorForIndex } from '../lib/people';
 import { currentRoute, historyEntry, routeToPath, sameRoute } from '../lib/routing';
+import { applySuggestions, wantsSuggestions } from '../lib/suggest';
 import {
   DEFAULT_SERVER_SETTINGS,
   DEFAULT_SETTINGS,
@@ -119,6 +120,12 @@ type Actions = {
   createReceipt: (groupId: string) => Promise<Receipt>;
   updateReceipt: (patch: Partial<Receipt> | ((r: Receipt) => Receipt)) => void;
   saveNow: () => Promise<void>;
+  /**
+   * Prefills the open receipt's dishes the way the group usually hands them
+   * out — once per reading. Silent when it cannot: offline, or an API that
+   * does not know the route yet.
+   */
+  offerSuggestions: (people: readonly Person[]) => Promise<void>;
   removeReceipt: (receiptId: string) => Promise<void>;
   keepServerVersion: () => void;
   dismissSaveError: () => void;
@@ -611,6 +618,21 @@ export const useAppStore = create<AppStore>((set, get) => {
     async saveNow() {
       cancelTimer();
       await push();
+    },
+
+    async offerSuggestions(people) {
+      const asked = get().receipt;
+      if (!asked || !get().online || !wantsSuggestions(asked, people)) return;
+      try {
+        const suggestions = await api.suggestAssignments(asked.id);
+        const current = get().receipt;
+        // Another receipt opened meanwhile, or already offered elsewhere.
+        if (!current || current.id !== asked.id || !wantsSuggestions(current, people)) return;
+        log.info('suggested assignments', { receipt: current.id, offered: suggestions.length });
+        get().updateReceipt(applySuggestions(current, suggestions, people, new Date().toISOString()));
+      } catch (error) {
+        log.warn('no suggested assignments', error);
+      }
     },
 
     async removeReceipt(receiptId) {

@@ -10,6 +10,7 @@ import { PhotoSheet } from '../ui/PhotoSheet';
 import { AmountInput } from '../ui/AmountInput';
 import { Segmented } from '../ui/Segmented';
 import type { DishSplit } from '../lib/reconcile';
+import { dropSuggested, undoSuggestions } from '../lib/suggest';
 import { uid } from '../lib/id';
 import { useAppStore } from '../store/useAppStore';
 import { useGroupPeople } from '../hooks/useGroupPeople';
@@ -135,11 +136,17 @@ export function AssignScreen({
       current.includes(personId) ? current.filter((id) => id !== personId) : [...current, personId],
     );
 
+  /* A dish handled by hand is the user's: it no longer carries a suggestion. */
   const setAssignments = (lineId: string, assignments: Assignment[]) => {
-    updateReceipt((current) => ({
-      ...current,
-      lines: current.lines.map((item) => (item.id === lineId ? { ...item, assignments } : item)),
-    }));
+    updateReceipt((current) =>
+      dropSuggested(
+        {
+          ...current,
+          lines: current.lines.map((item) => (item.id === lineId ? { ...item, assignments } : item)),
+        },
+        [lineId],
+      ),
+    );
   };
 
   /* A dish touched goes to everyone picked; touched again, once they all
@@ -165,8 +172,18 @@ export function AssignScreen({
     updateReceipt((current) => ({
       ...current,
       lines: current.lines.map((line) => ({ ...line, assignments: [...assignments] })),
+      suggestedLineIds: [],
     }));
   };
+
+  /* Who usually takes what: the dishes nobody has taken yet are prefilled,
+     once per reading, and the screen says so. */
+  const offerSuggestions = useAppStore((s) => s.offerSuggestions);
+  useEffect(() => {
+    void offerSuggestions(people);
+  }, [receipt.id, people, offerSuggestions]);
+  const suggested = new Set(receipt.suggestedLineIds ?? []);
+  const [suggestionsSeen, setSuggestionsSeen] = useState(false);
 
   const totalOf = (personId: string) =>
     settlement.people.find((entry) => entry.personId === personId)?.totalCents ?? 0;
@@ -191,6 +208,27 @@ export function AssignScreen({
           <Banner tone="warn" label="Aucun participant">
             Ce tricount n’a aucun participant. Ajoutez-en dans Tricount, puis rafraîchissez
             depuis l’écran du groupe.
+          </Banner>
+        ) : suggested.size > 0 && !suggestionsSeen ? (
+          <Banner
+            label="Plats préremplis"
+            action={
+              <>
+                <button
+                  type="button"
+                  className="linkButton"
+                  onClick={() => updateReceipt((current) => undoSuggestions(current))}
+                >
+                  Annuler
+                </button>
+                <button type="button" className="linkButton" onClick={() => setSuggestionsSeen(true)}>
+                  OK
+                </button>
+              </>
+            }
+          >
+            {suggested.size} plat{suggested.size > 1 ? 's' : ''} attribué
+            {suggested.size > 1 ? 's' : ''} comme d’habitude. Vérifiez-les.
           </Banner>
         ) : null
       }
@@ -264,6 +302,9 @@ export function AssignScreen({
                 <span className="dish__main">
                   <span className="dish__name">{lineTitle(line)}</span>
                   {caption ? <span className="dish__caption">{caption}</span> : null}
+                  {suggested.has(line.id) ? (
+                    <span className="dish__habit">comme d’habitude</span>
+                  ) : null}
                   {discounts.map((adjustment) => {
                     const count = adjustment.lineIds?.length ?? 1;
                     return (

@@ -161,6 +161,20 @@ export type Receipt = {
   tipBasis: TipBasis;
   status: ReceiptStatus;
   step: ReceiptStep;
+  /** When assignments were suggested from the group's habits: once per reading. */
+  suggestedAt?: string | null;
+  /** Dishes that still carry the suggested assignment. */
+  suggestedLineIds?: string[];
+};
+
+/** Who usually takes a dish, learned from the group's previous receipts. */
+export type SuggestedLine = {
+  lineId: string;
+  assignments: Assignment[];
+  /** Past receipts with this very assignment… */
+  seen: number;
+  /** …out of those with the dish. */
+  occurrences: number;
 };
 
 /** Lightweight view for a group's receipt list. */

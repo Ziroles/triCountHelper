@@ -19,6 +19,7 @@ import type {
   GroupSummary,
   Receipt,
   ReceiptSummary,
+  SuggestedLine,
   ServerSettings,
 } from '../types';
 
@@ -34,6 +35,9 @@ type FakeState = {
   accountEmail: string | null;
   /** Result `scanReceipt` will apply to the receipt, or an error to throw. */
   scanResult: Partial<Receipt> | null;
+  /** What `suggestAssignments` answers; an error stands for an API without the route. */
+  suggestions: SuggestedLine[] | ApiError;
+  suggestionCalls: number;
   scanError: ApiError | null;
   /** Log of the expenses sent to Tricount. */
   pushed: { receiptId: string; payload: unknown }[];
@@ -53,6 +57,8 @@ export const state: FakeState = {
   },
   accountEmail: null,
   scanResult: null,
+  suggestions: [],
+  suggestionCalls: 0,
   scanError: null,
   pushed: [],
   offline: false,
@@ -70,6 +76,8 @@ export function reset(): void {
   };
   state.accountEmail = null;
   state.scanResult = null;
+  state.suggestions = [];
+  state.suggestionCalls = 0;
   state.scanError = null;
   state.pushed = [];
   state.offline = false;
@@ -314,6 +322,14 @@ export async function scanReceipt(receiptId: string): Promise<Receipt> {
   };
   state.receipts.set(saved.id, saved);
   return saved;
+}
+
+export async function suggestAssignments(receiptId: string): Promise<SuggestedLine[]> {
+  guard();
+  state.suggestionCalls += 1;
+  await readReceipt(receiptId);
+  if (state.suggestions instanceof ApiError) throw state.suggestions;
+  return state.suggestions;
 }
 
 export async function pushExpense(receiptId: string, payload: unknown) {

@@ -792,6 +792,13 @@ input::placeholder {
   color: var(--st-discount);
 }
 
+/* A dish prefilled from the group's habits, until the user touches it. */
+.dish__habit {
+  font-size: var(--st-fs-caption);
+  color: var(--st-text-2);
+  font-style: italic;
+}
+
 .dish__everyone {
   flex: none;
   font-size: var(--st-fs-caption);
