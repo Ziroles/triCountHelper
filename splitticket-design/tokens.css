@@ -1,0 +1,67 @@
+/* SplitTicket — design « Classique »
+   Tokens à importer une fois, en racine de l'app. Thème sombre uniquement pour l'instant. */
+
+@import url("https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600&display=swap");
+
+:root {
+  /* Couleurs de base */
+  --st-page: #0F1012;          /* fond derrière l'app (desktop / bords) */
+  --st-bg: #17181B;            /* fond des écrans (Graphite) */
+  --st-surface: #202226;       /* cartes, sections, boutons secondaires */
+  --st-line: #2E3035;          /* séparateurs, bordures, piste de progression */
+  --st-text: #ECEAE6;          /* texte principal */
+  --st-text-muted: #C9C6C0;    /* lignes de détail (taxes, remise) */
+  --st-text-2: #9C9A94;        /* texte secondaire, libellés, sous-titres */
+  --st-accent: #EEEAE4;        /* bouton principal, segment actif, progression (Craie) */
+  --st-on-accent: #17181B;     /* texte sur --st-accent */
+  --st-discount: #8FCFA8;      /* montants négatifs (remises) */
+  --st-danger: #E39595;        /* erreurs, suppression */
+
+  /* Couleurs des convives, attribuées dans l'ordre du groupe Tricount.
+     Toujours du texte --st-bg posé dessus. */
+  --st-p1: #9DB4E8;
+  --st-p2: #E9A982;
+  --st-p3: #8FCFA8;
+  --st-p4: #E7A5C4;
+  --st-p5: #D9C27A;
+  --st-p6: #A9A3E8;
+  --st-p7: #7FC6CF;
+  --st-p8: #E39595;
+
+  /* Typographie */
+  --st-font: "Geist", system-ui, sans-serif;
+  --st-fs-display: 44px;   /* total à répartir, poids 300, letter-spacing -1px */
+  --st-fs-title: 16px;     /* titre d'écran, poids 600 */
+  --st-fs-body: 15px;      /* lignes de liste, boutons */
+  --st-fs-label: 14px;     /* titres de section (600), lignes de détail */
+  --st-fs-small: 13px;     /* segments, liens */
+  --st-fs-caption: 12px;   /* sous-titres, étape, détail par personne */
+  --st-fs-amount-lg: 18px; /* montants sur l'écran Envoi, poids 500 */
+
+  /* Rayons */
+  --st-r-btn: 12px;        /* boutons, bouton retour */
+  --st-r-card: 16px;       /* sections (.sec) */
+  --st-r-seg: 10px;        /* contrôle segmenté (conteneur) */
+  --st-r-seg-in: 7px;      /* segment actif */
+
+  /* Espacements */
+  --st-pad-screen: 16px;   /* marge latérale */
+  --st-gap-screen: 14px;   /* espace entre blocs d'un écran */
+  --st-pad-card: 12px 14px;
+  --st-row-py: 12px;       /* padding vertical d'une ligne de liste */
+
+  /* Tailles */
+  --st-btn-h: 52px;
+  --st-touch: 44px;        /* cible tactile minimale */
+  --st-avatar: 44px;       /* convives en haut de l'écran Plats */
+  --st-avatar-md: 36px;    /* écran Envoi */
+  --st-avatar-sm: 22px;    /* pastilles sur les lignes de plats */
+}
+
+body {
+  margin: 0;
+  background: var(--st-bg);
+  color: var(--st-text);
+  font-family: var(--st-font);
+  font-variant-numeric: tabular-nums; /* indispensable : tous les montants s'alignent */
+}

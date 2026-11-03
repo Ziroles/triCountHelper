@@ -18,6 +18,31 @@ export function formatFrenchDate(iso: string | null): string | null {
   }).format(date);
 }
 
+const SHORT_DATE = new Intl.DateTimeFormat('fr-CA', { day: 'numeric', month: 'short' });
+
+/** Date courte des en-têtes : `1 nov.` */
+export function formatShortDate(iso: string | null): string | null {
+  if (!iso) return null;
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+  const date = match
+    ? new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]))
+    : new Date(iso);
+  if (Number.isNaN(date.getTime())) return null;
+  return SHORT_DATE.format(date);
+}
+
+/** Titre et sous-titre de l'en-tête d'un ticket : `Cochon Dingue` / `Cacanada, 1 nov.` */
+export function receiptHeading(
+  receipt: Pick<Receipt, 'merchant' | 'purchaseDate' | 'createdAt'>,
+  groupTitle: string | null | undefined,
+): { title: string; subtitle: string } {
+  const date = formatShortDate(receipt.purchaseDate ?? receipt.createdAt);
+  return {
+    title: receipt.merchant?.trim() || 'Ticket sans nom',
+    subtitle: [groupTitle, date].filter(Boolean).join(', '),
+  };
+}
+
 export function receiptTitle(receipt: Pick<Receipt, 'merchant' | 'purchaseDate' | 'createdAt'>): string {
   const merchant = receipt.merchant?.trim() || 'Ticket';
   const date = formatFrenchDate(receipt.purchaseDate ?? receipt.createdAt);

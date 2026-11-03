@@ -11,14 +11,14 @@
  * six-month-old bookmark, from a share, or from a typo.
  */
 
-import type { ReceiptStep } from '../types';
+import type { FlowStep } from '../types';
 import type { Route } from '../store/useAppStore';
 
-const STEPS: readonly ReceiptStep[] = ['capture', 'processing', 'verify', 'assign', 'results'];
+const STEPS: readonly FlowStep[] = ['capture', 'processing', 'verify', 'assign', 'adjust', 'results'];
 
 export const HOME: Route = { name: 'groups' };
 
-function isStep(value: string): value is ReceiptStep {
+function isStep(value: string): value is FlowStep {
   return (STEPS as readonly string[]).includes(value);
 }
 

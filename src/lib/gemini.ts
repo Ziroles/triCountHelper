@@ -16,21 +16,16 @@
  */
 
 import { logger } from './log';
+import { GeminiError, type ReadingErrorCode } from './errors';
+
+export { GeminiError } from './errors';
 
 const log = logger('gemini');
 
 const ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models';
 
-export class GeminiError extends Error {
-  constructor(
-    message: string,
-    readonly code: string,
-    readonly retryable: boolean,
-  ) {
-    super(message);
-    this.name = 'GeminiError';
-  }
-}
+/** A reading that takes longer than this is given up on. */
+export const READ_TIMEOUT_MS = 60_000;
 
 const PROMPT = `You are reading a photographed Canadian till receipt. Return its contents as JSON.
 
@@ -100,13 +95,93 @@ const RESPONSE_SCHEMA = {
   required: ['lines'],
 };
 
-function messageForStatus(status: number): string {
-  if (status === 400 || status === 401 || status === 403)
-    return 'Google refused the key. Check it in the settings.';
-  if (status === 429) return 'Your Gemini quota is exhausted. Try again in a moment.';
-  if (status >= 500) return 'Google is not answering right now. Try again in a moment.';
-  return 'The reading failed.';
+type GoogleErrorBody = {
+  error?: {
+    code?: number;
+    message?: string;
+    status?: string;
+    details?: {
+      '@type'?: string;
+      reason?: string;
+      retryDelay?: string;
+      violations?: { quotaId?: string; quotaMetric?: string }[];
+    }[];
+  };
+};
+
+async function errorBody(response: Response): Promise<GoogleErrorBody> {
+  try {
+    return (await response.json()) as GoogleErrorBody;
+  } catch {
+    return {};
+  }
 }
+
+/** `"32s"`, `"1.5s"` → whole seconds, rounded up. */
+function parseDelay(delay: string | undefined): number | null {
+  const match = delay ? /^(\d+(?:\.\d+)?)s$/.exec(delay.trim()) : null;
+  return match ? Math.ceil(Number(match[1])) : null;
+}
+
+/**
+ * Google's refusal → a stable code. The body says more than the status: 400
+ * covers both a bad key and a bad image, 429 both a per-minute and a daily
+ * quota.
+ */
+export function classifyRefusal(
+  status: number,
+  body: GoogleErrorBody,
+  during: 'read' | 'list',
+): GeminiError {
+  const details = body.error?.details ?? [];
+  const reasons = details.map((detail) => detail.reason ?? '');
+  const message = body.error?.message ?? '';
+  const retryAfter = details.map((detail) => parseDelay(detail.retryDelay)).find((v) => v !== null) ?? null;
+
+  let code: ReadingErrorCode;
+  if (status === 401 || reasons.includes('API_KEY_INVALID') || /api key not valid/i.test(message)) {
+    code = 'key_invalid';
+  } else if (status === 403) {
+    code = 'forbidden';
+  } else if (status === 404) {
+    code = 'model_gone';
+  } else if (status === 429) {
+    const quotas = details.flatMap((detail) => detail.violations ?? []);
+    const daily = quotas.some((q) => /per.?day/i.test(`${q.quotaId ?? ''} ${q.quotaMetric ?? ''}`));
+    code = daily ? 'daily_quota' : 'rate_limited';
+  } else if (status === 400) {
+    // The request is fixed; on a reading, what varies is the image.
+    code = during === 'read' ? 'bad_image' : 'key_invalid';
+  } else if (status >= 500) {
+    code = 'unavailable';
+  } else {
+    code = 'unknown';
+  }
+
+  const retryable = code === 'rate_limited' || code === 'unavailable' || code === 'unknown';
+  return new GeminiError(code, retryable, code === 'rate_limited' ? retryAfter : null);
+}
+
+/** The caller's signal, plus our own time limit. */
+function withTimeout(signal: AbortSignal | undefined): AbortSignal | undefined {
+  if (typeof AbortSignal.timeout !== 'function') return signal;
+  const timeout = AbortSignal.timeout(READ_TIMEOUT_MS);
+  if (!signal) return timeout;
+  return typeof AbortSignal.any === 'function' ? AbortSignal.any([signal, timeout]) : signal;
+}
+
+function networkFailure(error: unknown, signal: AbortSignal | undefined): never {
+  // The caller gave up: not ours to describe.
+  if (signal?.aborted) throw error;
+  if (error instanceof DOMException && error.name === 'TimeoutError') {
+    log.warn('gemini timed out', { afterMs: READ_TIMEOUT_MS });
+    throw new GeminiError('timeout', true);
+  }
+  log.error('gemini unreachable', error);
+  throw new GeminiError('unreachable', true);
+}
+
+const BLOCKED_FINISH = new Set(['SAFETY', 'RECITATION', 'BLOCKLIST', 'PROHIBITED_CONTENT', 'SPII']);
 
 /**
  * Photo → the model's raw answer, to be handed to the API for sanitising.
@@ -127,7 +202,7 @@ export async function readReceipt(
   try {
     response = await fetch(`${ENDPOINT}/${encodeURIComponent(model)}:generateContent`, {
       method: 'POST',
-      signal,
+      signal: withTimeout(signal),
       headers: {
         'content-type': 'application/json',
         /* In a header, not in `?key=`: a URL ends up in browser history and can
@@ -145,29 +220,33 @@ export async function readReceipt(
       }),
     });
   } catch (error) {
-    log.error('gemini unreachable', error);
-    throw new GeminiError(
-      'Could not reach Google. Check your connection.',
-      'unreachable',
-      true,
-    );
+    networkFailure(error, signal);
   }
 
   if (!response.ok) {
-    log.warn('gemini refused', { status: response.status });
-    throw new GeminiError(
-      messageForStatus(response.status),
-      response.status === 429 ? 'quota' : 'refused',
-      response.status === 429 || response.status >= 500,
-    );
+    const refusal = classifyRefusal(response.status, await errorBody(response), 'read');
+    // Google's own status and reason, for the logs; never the key.
+    log.warn('gemini refused', { status: response.status, code: refusal.code });
+    throw refusal;
   }
 
   const body = (await response.json()) as {
-    candidates?: { content?: { parts?: { text?: string }[] } }[];
+    promptFeedback?: { blockReason?: string };
+    candidates?: { finishReason?: string; content?: { parts?: { text?: string }[] } }[];
   };
-  const text = body.candidates?.[0]?.content?.parts?.map((part) => part.text ?? '').join('') ?? '';
+  const candidate = body.candidates?.[0];
+  const finish = candidate?.finishReason ?? '';
+  if (body.promptFeedback?.blockReason || BLOCKED_FINISH.has(finish)) {
+    log.warn('gemini blocked the reading', { blockReason: body.promptFeedback?.blockReason, finish });
+    throw new GeminiError('blocked', false);
+  }
+  if (finish === 'MAX_TOKENS') {
+    log.warn('gemini answer truncated');
+    throw new GeminiError('truncated', false);
+  }
+  const text = candidate?.content?.parts?.map((part) => part.text ?? '').join('') ?? '';
   if (text.trim() === '') {
-    throw new GeminiError('The receipt could not be read from this photo.', 'empty', true);
+    throw new GeminiError('empty', true);
   }
 
   done('read', { characters: text.length });
@@ -191,21 +270,17 @@ export async function listModels(
   let response: Response;
   try {
     response = await fetch(`${ENDPOINT}?pageSize=1000`, {
-      signal,
+      signal: withTimeout(signal),
       headers: { 'x-goog-api-key': apiKey },
     });
   } catch (error) {
-    log.error('gemini unreachable', error);
-    throw new GeminiError('Could not reach Google. Check your connection.', 'unreachable', true);
+    networkFailure(error, signal);
   }
 
   if (!response.ok) {
-    log.warn('gemini refused the model listing', { status: response.status });
-    throw new GeminiError(
-      messageForStatus(response.status),
-      response.status === 429 ? 'quota' : 'refused',
-      response.status === 429 || response.status >= 500,
-    );
+    const refusal = classifyRefusal(response.status, await errorBody(response), 'list');
+    log.warn('gemini refused the model listing', { status: response.status, code: refusal.code });
+    throw refusal;
   }
 
   const body = (await response.json()) as {

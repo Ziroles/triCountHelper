@@ -7,8 +7,8 @@ import { PersonPill } from '../ui/PersonPill';
 import { useAppStore } from '../store/useAppStore';
 import { useGroupPeople } from '../hooks/useGroupPeople';
 import { useLongPress } from '../hooks/useLongPress';
-import { formatCents } from '../lib/money';
-import { formatFrenchDate } from '../lib/export';
+import { formatAmount } from '../lib/money';
+import { formatShortDate } from '../lib/export';
 import type { ReceiptSummary } from '../types';
 
 /** A group's receipts, and its participants as Tricount knows them. */
@@ -25,14 +25,13 @@ function ReceiptRow({
   const press = useLongPress({ onLongPress, onClick: onOpen });
   return (
     <button type="button" className="list__main" {...press}>
-      <span className="list__title">
+      <span className={`list__title${receipt.merchant?.trim() ? '' : ' list__title--empty'}`}>
         {receipt.merchant?.trim() || 'Ticket sans nom'}
         {receipt.status === 'settled' ? <span className="tag">réglé</span> : null}
       </span>
       <span className="list__meta">
-        {formatFrenchDate(receipt.purchaseDate ?? receipt.createdAt)}
-        {' · '}
-        {receipt.lineCount} ligne{receipt.lineCount > 1 ? 's' : ''}
+        {formatShortDate(receipt.purchaseDate ?? receipt.createdAt)}, {receipt.lineCount} ligne
+        {receipt.lineCount > 1 ? 's' : ''}
       </span>
     </button>
   );
@@ -86,15 +85,15 @@ export function GroupScreen({ groupId }: GroupScreenProps) {
             {busy ? 'Création…' : 'Nouveau ticket'}
           </Button>
           {!online ? (
-            <p className="muted center">
+            <p className="muted muted--center">
               Hors ligne : consultation seulement. Créer un ticket demande le réseau.
             </p>
           ) : null}
         </>
       }
     >
-      <section className="section">
-        <div className="row row--between">
+      <section className="groupPeople" aria-label="Participants">
+        <div className="groupPeople__head">
           <h2>Participants</h2>
           <button
             type="button"
@@ -106,22 +105,25 @@ export function GroupScreen({ groupId }: GroupScreenProps) {
           </button>
         </div>
         {people.length === 0 ? (
-          <p className="muted">Aucun participant lu depuis le tricount.</p>
+          <p className="muted">
+            Aucun participant lu depuis le tricount. Ajoutez-en dans Tricount, puis
+            rafraîchissez.
+          </p>
         ) : (
-          <div className="brush__pills">
+          <ul className="groupPeople__row">
             {people.map((person) => (
-              <PersonPill key={person.id} person={person} size="sm" />
+              <li key={person.id} className="groupPeople__person">
+                <PersonPill person={person} size="md" />
+                <span aria-hidden="true">{person.name}</span>
+              </li>
             ))}
-          </div>
+          </ul>
         )}
-        <p className="muted">
-          Ils viennent du tricount. Ajoutez-y quelqu’un depuis Tricount, puis rafraîchissez.
-        </p>
       </section>
 
       {error ? <p className="warnText">{error}</p> : null}
 
-      <section className="section">
+      <section className="stack">
         <h2>Tickets</h2>
         {receipts.length === 0 ? (
           <p className="empty">
@@ -143,14 +145,14 @@ export function GroupScreen({ groupId }: GroupScreenProps) {
                   }
                   onLongPress={() => setPendingDelete(receipt)}
                 />
-                <span className="list__amount num">{formatCents(receipt.totalCents)}</span>
+                <span className="list__amount num">{formatAmount(receipt.totalCents)}</span>
                 <button
                   type="button"
                   className="iconButton iconButton--quiet"
                   aria-label={`Supprimer ${receipt.merchant ?? 'ce ticket'}`}
                   onClick={() => setPendingDelete(receipt)}
                 >
-                  ✕
+                  <span aria-hidden="true">✕</span>
                 </button>
               </li>
             ))}

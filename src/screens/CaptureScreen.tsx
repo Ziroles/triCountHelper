@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { Screen } from '../ui/Screen';
 import { Button } from '../ui/Button';
 import { CropBox } from '../ui/CropBox';
+import { Sheet } from '../ui/Sheet';
+import { PhotoSourceSheet, useHasCamera } from '../ui/PhotoSourceSheet';
 import {
   FULL_CROP,
   downscaleForUpload,
@@ -47,7 +49,11 @@ export function CaptureScreen({ receipt, onBack, onDone, onSkip, onManual }: Cap
   const [error, setError] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const [restored, setRestored] = useState(false);
-  const fileInput = useRef<HTMLInputElement>(null);
+  const [confirmReread, setConfirmReread] = useState(false);
+  const [pickSource, setPickSource] = useState(false);
+  const cameraInput = useRef<HTMLInputElement>(null);
+  const galleryInput = useRef<HTMLInputElement>(null);
+  const hasCamera = useHasCamera();
   const userPicked = useRef(false);
 
   /* The receipt keeps its photo: coming back to this screen puts it back in
@@ -108,6 +114,12 @@ export function CaptureScreen({ receipt, onBack, onDone, onSkip, onManual }: Cap
     setCrop(FULL_CROP);
   };
 
+  /* No camera detected (a computer, mostly): straight to the file picker. */
+  const pickPhoto = () => {
+    if (hasCamera === false) galleryInput.current?.click();
+    else setPickSource(true);
+  };
+
   const confirm = async () => {
     if (!original) return;
     setBusy(true);
@@ -154,7 +166,15 @@ export function CaptureScreen({ receipt, onBack, onDone, onSkip, onManual }: Cap
       footer={
         preview ? (
           <>
-            <Button variant="primary" full disabled={busy || !online} onClick={() => void confirm()}>
+            <Button
+              variant="primary"
+              full
+              disabled={busy || !online}
+              onClick={() =>
+                // A new reading replaces the lines, and the dishes handed out with them.
+                receipt.lines.length > 0 ? setConfirmReread(true) : void confirm()
+              }
+            >
               {busy ? 'Envoi…' : restored ? 'Relire le ticket' : 'Lire le ticket'}
             </Button>
             {onSkip ? (
@@ -165,14 +185,14 @@ export function CaptureScreen({ receipt, onBack, onDone, onSkip, onManual }: Cap
             <button
               type="button"
               className="linkButton linkButton--center"
-              onClick={() => fileInput.current?.click()}
+              onClick={pickPhoto}
             >
               Reprendre une photo
             </button>
           </>
         ) : (
           <>
-            <Button variant="primary" full onClick={() => fileInput.current?.click()}>
+            <Button variant="primary" full onClick={pickPhoto}>
               Prendre ou choisir une photo
             </Button>
             <button type="button" className="linkButton linkButton--center" onClick={onManual}>
@@ -182,27 +202,50 @@ export function CaptureScreen({ receipt, onBack, onDone, onSkip, onManual }: Cap
         )
       }
     >
-      {/* No `capture` attribute: it would open the camera directly, while
-          without it the phone offers the choice between camera and gallery. */}
+      {/* Two hidden inputs: `capture` opens the back camera directly, the
+          other one the gallery. The value is cleared so the same file can be
+          picked twice in a row. */}
       <input
-        ref={fileInput}
+        ref={cameraInput}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        className="visually-hidden"
+        data-testid="camera-input"
+        onChange={(event) => {
+          accept(event.target.files?.[0]);
+          event.target.value = '';
+        }}
+      />
+      <input
+        ref={galleryInput}
         type="file"
         accept="image/*"
         className="visually-hidden"
-        onChange={(event) => accept(event.target.files?.[0])}
+        data-testid="gallery-input"
+        onChange={(event) => {
+          accept(event.target.files?.[0]);
+          event.target.value = '';
+        }}
       />
 
       {preview ? (
         <>
           <CropBox src={preview} crop={crop} onChange={setCrop} />
           <div className="row row--gap row--center">
-            <Button onClick={() => setRotation(((rotation + 270) % 360) as Rotation)}>
+            <Button
+              aria-label="Pivoter à gauche"
+              onClick={() => setRotation(((rotation + 270) % 360) as Rotation)}
+            >
               ↺ Pivoter
             </Button>
-            <Button onClick={() => setRotation(((rotation + 90) % 360) as Rotation)}>
+            <Button
+              aria-label="Pivoter à droite"
+              onClick={() => setRotation(((rotation + 90) % 360) as Rotation)}
+            >
               ↻ Pivoter
             </Button>
-            <Button onClick={() => setCrop(FULL_CROP)}>Tout l’écran</Button>
+            <Button onClick={() => setCrop(FULL_CROP)}>Tout le ticket</Button>
           </div>
         </>
       ) : (
@@ -219,8 +262,11 @@ export function CaptureScreen({ receipt, onBack, onDone, onSkip, onManual }: Cap
             accept(event.dataTransfer.files?.[0]);
           }}
         >
-          <p>Déposez une photo ici, ou choisissez-en une.</p>
-          <Button onClick={() => fileInput.current?.click()}>Choisir une image</Button>
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+            <path d="M4 8h3l2-3h6l2 3h3v11H4z" strokeLinejoin="round" />
+            <circle cx="12" cy="13" r="3.5" />
+          </svg>
+          <p>Photographiez le ticket, ou déposez une image ici.</p>
         </div>
       )}
 
@@ -244,6 +290,39 @@ export function CaptureScreen({ receipt, onBack, onDone, onSkip, onManual }: Cap
         <li>Évitez les reflets sur le papier brillant.</li>
         <li>Recadrez au plus près : moins d’arrière-plan, lecture plus sûre.</li>
       </ul>
+      <PhotoSourceSheet
+        open={pickSource}
+        onClose={() => setPickSource(false)}
+        onCamera={() => cameraInput.current?.click()}
+        onGallery={() => galleryInput.current?.click()}
+      />
+      <Sheet
+        open={confirmReread}
+        title="Relire le ticket"
+        onClose={() => setConfirmReread(false)}
+        footer={
+          <div className="row row--gap">
+            <Button full onClick={() => setConfirmReread(false)}>
+              Annuler
+            </Button>
+            <Button
+              variant="primary"
+              full
+              onClick={() => {
+                setConfirmReread(false);
+                void confirm();
+              }}
+            >
+              Relire quand même
+            </Button>
+          </div>
+        }
+      >
+        <p className="muted">
+          Ce ticket a déjà {receipt.lines.length} ligne{receipt.lines.length > 1 ? 's' : ''}. Une
+          nouvelle lecture les remplace, avec les plats déjà attribués et vos corrections.
+        </p>
+      </Sheet>
     </Screen>
   );
 }

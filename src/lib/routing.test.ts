@@ -8,6 +8,7 @@ const routes: Route[] = [
   { name: 'settings' },
   { name: 'group', groupId: 'tABC123456' },
   { name: 'receipt', groupId: 'tABC123456', receiptId: 'r-1', step: 'capture' },
+  { name: 'receipt', groupId: 'tABC123456', receiptId: 'r-1', step: 'adjust' },
   { name: 'receipt', groupId: 'tABC123456', receiptId: 'r-1', step: 'results' },
 ];
 

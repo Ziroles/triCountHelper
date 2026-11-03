@@ -108,7 +108,10 @@ export function tipForPercent(
       ? subtotalOf(receipt)
       : subtotalOf(receipt) + taxesTotalOf(receipt.taxes) + adjustmentsTotal(receipt.adjustments);
   if (!Number.isFinite(percent) || percent <= 0 || base <= 0) return 0;
-  return Math.round((base * percent) / 100);
+  /* In tenths of a percent, the product stays an integer: 12,5 % of a base
+     rounds half up on the exact value, not on a float approximation. */
+  const tenths = Math.round(percent * 10);
+  return Math.round((base * tenths) / 1000);
 }
 
 type SettleInput = Pick<

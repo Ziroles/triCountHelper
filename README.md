@@ -153,14 +153,21 @@ délivré par l'API et n'existe pas dans le build.
 ## Parcours
 
 ```
-Groupes ─→ Groupe ─→ Photo ─→ Lecture ─→ Vérification ─→ Attribution ─→ Résultats
-   ↑          ↑                                                            │
+Groupes ─→ Groupe ─→ Photo ─→ Lecture ─→ 1. Plats ─→ 2. Ajustements ─→ 3. Envoi
+   ↑          ↑        │                    ↕                              │
+   │          │        └─→ Saisie à la main (lignes)                       │
    └──────────┴────────────────────────────────────────────────────────────┘
 ```
 
+Un nouveau ticket se règle en **trois étapes** : on attribue les plats (totaux de chacun en
+direct), on vérifie taxes, remises et pourboire, puis on choisit qui a payé et on envoie vers
+Tricount. La correction des lignes (libellés, prix, quantités) s'ouvre depuis le menu « ⋯ » de
+l'étape Plats, et c'est le point d'entrée de la saisie manuelle.
+
 L'étape courante est mémorisée **sur le ticket, côté serveur** : le rouvrir plus tard, ou depuis
-un autre appareil, reprend là où il avait été laissé. La saisie manuelle est accessible depuis
-l'écran photo, pour tester la chaîne de calcul sans dépendre du modèle de vision.
+un autre appareil, reprend là où il avait été laissé. L'étape Ajustements n'existe que côté
+client (l'API ne connaît que `capture`, `processing`, `verify`, `assign`, `results`) : elle est
+mémorisée comme `assign`.
 
 **Hors ligne** : les groupes et tickets déjà consultés restent lisibles. Créer ou modifier
 demande le réseau, et l'interface le dit — il n'y a pas de file de rejeu, parce que rejouer une
@@ -222,7 +229,7 @@ conservés qu'à titre indicatif.
 Le pourboire ne figure pas sur le ticket du commerçant : il n'entre donc pas dans le contrôle
 `sous-total + taxes = total`, mais bien dans le total réparti.
 
-Il se règle sur l'écran des résultats : pourcentages proposés, montant libre, et base de calcul
+Il se règle à l'étape Ajustements : pourcentages proposés, montant libre, et base de calcul
 (par défaut le **sous-total avant taxes**, avec une option taxes comprises). Il se répartit au
 prorata de la consommation de chacun, toujours par la méthode du plus fort reste.
 

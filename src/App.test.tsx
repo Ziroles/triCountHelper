@@ -77,46 +77,56 @@ describe('parcours complet, sans photo', () => {
     await fillAmount(user, totals[0] as HTMLElement, '30,00');
     await fillAmount(user, totals[1] as HTMLElement, '20,00');
 
-    await user.click(screen.getByRole('button', { name: '+ Québec' }));
-    await fillAmount(user, await screen.findByLabelText('Montant de TPS'), '2,50');
-    await fillAmount(user, screen.getByLabelText('Montant de TVQ'), '4,99');
-
     await user.type(screen.getByLabelText('Total lu sur le ticket'), '57,49');
+    await user.click(screen.getByRole('button', { name: 'Continuer' }));
 
-    await waitFor(() => {
-      const banner = screen.getByRole('group', { name: 'Contrôle du total' });
-      expect(banner).toHaveTextContent('50,00');
-      expect(banner).toHaveTextContent('7,49');
-      expect(banner).toHaveTextContent('✓');
-    });
-
-    await user.click(screen.getByRole('button', { name: 'Attribuer' }));
-    await screen.findByRole('heading', { name: 'Attribution' });
-
-    // The participants are already there: they come from the tricount, and the
-    // first is preselected so the screen is usable without a prior gesture.
+    // Step 1 — dishes. The participants are already there: they come from the
+    // tricount, and the first is preselected so the screen is usable at once.
+    await screen.findByText('Étape 1 sur 3');
     await screen.findByRole('button', { name: 'Léa' });
     await user.click(screen.getByText('Tartare')); // → Mathieu, preselected
-    await user.click(screen.getByRole('button', { name: 'Mathieu' })); // remove them
+    await user.click(screen.getByRole('button', { name: 'Mathieu' })); // deselect them
     await user.click(screen.getByRole('button', { name: 'Léa' })); // pick Léa
     await user.click(screen.getByText('Pâtes')); // → Léa
 
-    await waitFor(() => expect(screen.queryByText(/non attribuée/)).not.toBeInTheDocument());
-    await user.click(screen.getByRole('button', { name: 'Voir les résultats' }));
+    // Every dish has an owner: none falls back to "everyone".
+    await waitFor(() => expect(screen.queryByText('Tous')).not.toBeInTheDocument());
+    // Running totals, before taxes since none are entered yet.
+    expect(screen.getByRole('button', { name: 'Mathieu' })).toHaveAccessibleDescription('30,00');
+    expect(
+      screen.getByRole('img', { name: /Répartition du total : Mathieu 60 %, Léa 40 %/ }),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Continuer' }));
 
-    await screen.findByRole('heading', { name: 'Résultats' });
-    const mathieu = () =>
-      screen.getByRole('button', { name: 'Mathieu' }).closest('li') as HTMLElement;
-    expect(within(mathieu()).getByText('34,49 $')).toBeInTheDocument();
+    // Step 2 — adjustments. The regime's taxes come prefilled from their rate.
+    await screen.findByText('Étape 2 sur 3');
+    await user.click(screen.getByRole('button', { name: '+ Québec' }));
+    expect(await screen.findByRole('button', { name: /TPS 5 %\s*2,50/ })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /TVQ 9,975 %/ }));
+    await fillAmount(user, await screen.findByLabelText('Montant de TVQ'), '4,99');
+    await user.click(screen.getByRole('button', { name: 'Terminé' }));
+
+    await waitFor(() =>
+      expect(screen.getByRole('group', { name: 'Contrôle du total' })).toHaveTextContent('✓'),
+    );
 
     await user.click(screen.getByRole('button', { name: '18 %' }));
-    await waitFor(() => expect(within(mathieu()).getByText('39,89 $')).toBeInTheDocument());
-    expect(within(mathieu()).getByText(/pourboire/)).toHaveTextContent('5,40');
+    await waitFor(() =>
+      expect(screen.getByRole('region', { name: 'Pourboire' })).toHaveTextContent('9,00'),
+    );
+    expect(screen.getByText('66,49 $')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Continuer' }));
 
-    const total = screen.getByText('Total').closest('div') as HTMLElement;
+    // Step 3 — sending.
+    await screen.findByText('Étape 3 sur 3');
+    const mathieu = screen.getByRole('button', { name: /^Mathieu/ }).closest('li') as HTMLElement;
+    expect(within(mathieu).getByText('39,89')).toBeInTheDocument();
+    expect(within(mathieu).getByText(/pourb\./)).toHaveTextContent('pourb. 5,40');
+
+    const total = screen.getByText('Total').closest('li') as HTMLElement;
     expect(within(total).getByText('66,49 $')).toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: 'Copier le récapitulatif' }));
+    await user.click(screen.getByRole('button', { name: 'Copier le récap' }));
     await waitFor(async () => {
       const copied = await navigator.clipboard.readText();
       expect(copied).toContain('Sous-total : 50,00 $ · taxes : 7,49 $');
@@ -144,29 +154,30 @@ describe('parcours complet, sans photo', () => {
     await fillAmount(user, totals[1] as HTMLElement, '40,00');
 
     await user.click(screen.getByLabelText('Pain : soumise aux taxes'));
+    await user.click(screen.getByRole('button', { name: 'Continuer' }));
 
-    await user.click(screen.getByRole('button', { name: '+ Québec' }));
-    await fillAmount(user, await screen.findByLabelText('Montant de TPS'), '3,00');
-    await fillAmount(user, screen.getByLabelText('Montant de TVQ'), '5,99');
-
-    await user.click(screen.getByRole('button', { name: 'Attribuer' }));
-    await screen.findByRole('heading', { name: 'Attribution' });
-
+    await screen.findByText('Étape 1 sur 3');
     await screen.findByRole('button', { name: 'Léa' });
     await user.click(screen.getByText('Bière')); // → Mathieu, preselected
     await user.click(screen.getByRole('button', { name: 'Mathieu' }));
     await user.click(screen.getByRole('button', { name: 'Léa' }));
     await user.click(screen.getByText('Pain')); // → Léa
+    await user.click(screen.getByRole('button', { name: 'Continuer' }));
 
-    await user.click(screen.getByRole('button', { name: 'Voir les résultats' }));
-    await screen.findByRole('heading', { name: 'Résultats' });
+    // The prefill only counts the taxable dishes: 60,00 × 5 % and × 9,975 %.
+    await screen.findByText('Étape 2 sur 3');
+    await user.click(screen.getByRole('button', { name: '+ Québec' }));
+    expect(await screen.findByRole('button', { name: /TPS 5 %\s*3,00/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /TVQ 9,975 %\s*5,99/ })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Continuer' }));
 
-    const lea = screen.getByRole('button', { name: 'Léa' }).closest('li') as HTMLElement;
-    expect(within(lea).getByText('40,00 $')).toBeInTheDocument();
-    expect(within(lea).getByText(/dont taxes/)).toHaveTextContent('0,00');
+    await screen.findByText('Étape 3 sur 3');
+    const lea = screen.getByRole('button', { name: /^Léa/ }).closest('li') as HTMLElement;
+    expect(within(lea).getByText('40,00', { selector: '.payee__amount' })).toBeInTheDocument();
+    expect(within(lea).getByText(/taxes 0,00/)).toBeInTheDocument();
 
-    const mathieu = screen.getByRole('button', { name: 'Mathieu' }).closest('li') as HTMLElement;
-    expect(within(mathieu).getByText('68,99 $')).toBeInTheDocument();
+    const mathieu = screen.getByRole('button', { name: /^Mathieu/ }).closest('li') as HTMLElement;
+    expect(within(mathieu).getByText('68,99')).toBeInTheDocument();
   });
 
   it('signale l’écart avec le total du ticket, et sait l’absorber', async () => {
@@ -179,7 +190,16 @@ describe('parcours complet, sans photo', () => {
 
     const gap = await screen.findByText(/Écart de/);
     expect(gap).toHaveTextContent('1,20');
-    await user.click(screen.getByRole('button', { name: 'Ajouter en ajustement' }));
+
+    // The gap is settled at step 2, with the other adjustments.
+    await user.click(screen.getByRole('button', { name: 'Continuer' }));
+    await screen.findByText('Étape 1 sur 3');
+    await user.click(screen.getByRole('button', { name: 'Continuer' }));
+    await screen.findByText('Étape 2 sur 3');
+
+    const control = screen.getByRole('group', { name: 'Contrôle du total' });
+    expect(control).toHaveTextContent('−1,20');
+    await user.click(within(control).getByRole('button', { name: 'Ajouter en ajustement' }));
 
     await waitFor(() =>
       expect(screen.getByRole('group', { name: 'Contrôle du total' })).toHaveTextContent('✓'),
@@ -280,7 +300,7 @@ describe('geste retour et adresses', () => {
     window.history.back();
 
     await waitFor(() => expect(useAppStore.getState().route.name).toBe('groups'));
-    await screen.findByRole('button', { name: 'Rejoindre un groupe' });
+    await screen.findByRole('button', { name: 'Lier un groupe Tricount' });
   });
 
   it('ouvre directement l’écran désigné par l’adresse', async () => {
@@ -295,7 +315,7 @@ describe('geste retour et adresses', () => {
     window.history.replaceState(null, '', '/nimporte/quoi');
     render(<App />);
 
-    await screen.findByRole('button', { name: 'Rejoindre un groupe' });
+    await screen.findByRole('button', { name: 'Lier un groupe Tricount' });
     expect(useAppStore.getState().route).toEqual({ name: 'groups' });
   });
 });
