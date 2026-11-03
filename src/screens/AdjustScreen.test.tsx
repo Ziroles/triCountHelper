@@ -69,6 +69,27 @@ describe('plats et ajustements', () => {
 
   const receipt = () => useAppStore.getState().receipt;
 
+  it('attribue un plat à plusieurs convives d’un seul toucher', async () => {
+    const user = await openDishes();
+
+    await user.click(screen.getByRole('button', { name: 'Léa' })); // Mathieu stays picked
+    expect(screen.getByRole('button', { name: 'Mathieu' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'Léa' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByText(/partager entre Mathieu et Léa/)).toBeInTheDocument();
+
+    await user.click(screen.getByText('Pâtes'));
+    await waitFor(() =>
+      expect(receipt()?.lines[1]?.assignments).toEqual([
+        { personId: 'm-lea', shares: 1 },
+        { personId: 'm-mathieu', shares: 1 },
+      ]),
+    );
+
+    // Touched again: both have it, both leave it.
+    await user.click(screen.getByText('Pâtes'));
+    await waitFor(() => expect(receipt()?.lines[1]?.assignments).toEqual([]));
+  });
+
   it('ajoute en partage un plat déjà pris, et le retire au second toucher', async () => {
     const user = await openDishes();
 
@@ -265,6 +286,7 @@ describe('plats et ajustements', () => {
     await user.click(screen.getByRole('button', { name: 'Mathieu' })); // deselect
     await user.click(screen.getByRole('button', { name: 'Léa' }));
     await user.click(screen.getByText('Tartare')); // Léa joins
+    await user.click(screen.getByRole('button', { name: 'Léa' })); // deselect
     await user.click(screen.getByRole('button', { name: 'Mathieu' }));
     await user.click(screen.getByText('Tartare')); // Mathieu leaves
 

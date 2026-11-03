@@ -54,6 +54,13 @@ function lineCaption(line: ReceiptLine): string | null {
  * est retiré. Les totaux affichés sont les totaux finaux — taxes, remises et
  * pourboire compris — et bougent à chaque toucher.
  */
+/** « Léa », « Léa et Sam », « Léa, Sam et Tom ». */
+function namesOf(people: readonly Person[]): string {
+  const names = people.map((person) => person.name);
+  if (names.length <= 1) return names.join('');
+  return `${names.slice(0, -1).join(', ')} et ${names[names.length - 1]}`;
+}
+
 export function AssignScreen({
   receipt,
   onBack,
@@ -69,7 +76,9 @@ export function AssignScreen({
   const updateReceipt = useAppStore((s) => s.updateReceipt);
   const imageUrl = useReceiptImage(receipt.id, receipt.imageId);
 
-  const [selected, setSelected] = useState<string | null>(null);
+  /* Several people can be picked at once: a dish touched then goes to all of
+     them in one gesture. */
+  const [selected, setSelected] = useState<string[]>([]);
   const [sharesFor, setSharesFor] = useState<string | null>(null);
   const [confirmUnassigned, setConfirmUnassigned] = useState(false);
   const [photoOpen, setPhotoOpen] = useState(false);
@@ -114,10 +123,17 @@ export function AssignScreen({
   useEffect(() => {
     if (primed.current || people.length === 0) return;
     primed.current = true;
-    setSelected(people[0]!.id);
+    setSelected([people[0]!.id]);
   }, [people]);
 
-  const selectedPerson = selected ? personById(people, selected) : undefined;
+  /* In the tricount's order, whatever the order of the taps; someone who left
+     the tricount meanwhile drops out. */
+  const selectedPeople = people.filter((person) => selected.includes(person.id));
+  const selectedNames = namesOf(selectedPeople);
+  const toggleSelected = (personId: string) =>
+    setSelected((current) =>
+      current.includes(personId) ? current.filter((id) => id !== personId) : [...current, personId],
+    );
 
   const setAssignments = (lineId: string, assignments: Assignment[]) => {
     updateReceipt((current) => ({
@@ -126,14 +142,22 @@ export function AssignScreen({
     }));
   };
 
+  /* A dish touched goes to everyone picked; touched again, once they all
+     have it, it leaves them all. The others on the dish keep their shares. */
   const toggleOnLine = (line: ReceiptLine) => {
-    if (!selected) return;
-    const has = line.assignments.some((a) => a.personId === selected);
+    const ids = selectedPeople.map((person) => person.id);
+    if (ids.length === 0) return;
+    const allHave = ids.every((id) => line.assignments.some((a) => a.personId === id));
     setAssignments(
       line.id,
-      has
-        ? line.assignments.filter((a) => a.personId !== selected)
-        : [...line.assignments, { personId: selected, shares: 1 }],
+      allHave
+        ? line.assignments.filter((a) => !ids.includes(a.personId))
+        : [
+            ...line.assignments,
+            ...ids
+              .filter((id) => !line.assignments.some((a) => a.personId === id))
+              .map((personId) => ({ personId, shares: 1 })),
+          ],
     );
   };
 
@@ -187,7 +211,7 @@ export function AssignScreen({
         <div className="diners">
           <div className={`diners__row${people.length > 4 ? ' diners__row--scroll' : ''}`}>
             {people.map((person) => {
-              const on = person.id === selected;
+              const on = selected.includes(person.id);
               return (
                 <button
                   key={person.id}
@@ -196,7 +220,7 @@ export function AssignScreen({
                   aria-pressed={on}
                   aria-label={person.name}
                   aria-describedby={`diner-total-${person.id}`}
-                  onClick={() => setSelected(on ? null : person.id)}
+                  onClick={() => toggleSelected(person.id)}
                 >
                   <PersonPill person={person} size="lg" selected={on} decorative />
                   <span className="diner__name" aria-hidden="true">
@@ -265,19 +289,23 @@ export function AssignScreen({
       {people.length > 0 ? (
         <div className="dishTools">
           <p className="muted">
-            {selectedPerson
-              ? `Touchez un plat pour l’ajouter à ${selectedPerson.name} ou le lui retirer.`
-              : 'Choisissez un convive, puis touchez ses plats.'}{' '}
+            {selectedPeople.length === 1
+              ? `Touchez un plat pour l’ajouter à ${selectedNames} ou le lui retirer.`
+              : selectedPeople.length > 1
+                ? `Touchez un plat pour le partager entre ${selectedNames}, ou le leur retirer.`
+                : 'Choisissez un ou plusieurs convives, puis touchez leurs plats.'}{' '}
             Un plat non attribué est partagé entre tous. Appui long : régler les parts.
           </p>
           <div className="dishTools__links">
             <button
               type="button"
               className="linkButton"
-              disabled={!selectedPerson}
-              onClick={() => selected && assignAll([{ personId: selected, shares: 1 }])}
+              disabled={selectedPeople.length === 0}
+              onClick={() =>
+                assignAll(selectedPeople.map((person) => ({ personId: person.id, shares: 1 })))
+              }
             >
-              {selectedPerson ? `Tout attribuer à ${selectedPerson.name}` : 'Tout attribuer à la sélection'}
+              {selectedPeople.length > 0 ? `Tout attribuer à ${selectedNames}` : 'Tout attribuer à la sélection'}
             </button>
             <button
               type="button"
