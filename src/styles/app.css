@@ -658,11 +658,21 @@ input::placeholder {
 
 /* ── Étape 1 : convives ────────────────────────────────────────────────── */
 
+/* Reste collée en haut de .screen__body pendant qu'on fait défiler les plats :
+   on recouvre le padding du corps (marges négatives) pour que rien ne passe
+   au-dessus ni sur les côtés. */
 .diners {
+  position: sticky;
+  top: calc(-1 * var(--st-gap-screen));
+  z-index: 2;
+  flex: none;
   display: flex;
   flex-direction: column;
   gap: var(--st-gap-screen);
-  padding-top: var(--space-1);
+  margin: calc(-1 * var(--st-gap-screen)) calc(-1 * var(--st-pad-screen)) 0;
+  padding: calc(var(--st-gap-screen) + var(--space-1)) var(--st-pad-screen) var(--space-2);
+  background: var(--st-bg);
+  border-bottom: 1px solid var(--st-line);
 }
 
 .diners__row {
