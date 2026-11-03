@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { useAppStore } from '../store/useAppStore';
 import { Banner } from '../ui/Banner';
 import { Button } from '../ui/Button';
@@ -119,17 +119,19 @@ export function ReceiptFlow({ groupId, receiptId, step }: ReceiptFlowProps) {
     if (next) updateReceipt(next);
   }, [receipt, receiptId, updateReceipt]);
 
-  /* Where the user came from: the line editor opens from the dishes and the
-     adjustments steps as well as after a manual entry, and both "back" and
-     "continue" must return there. Derived from the step during render, the way
-     React recommends for state that follows a prop. */
-  const [trail, setTrail] = useState<{ step: FlowStep; previous: FlowStep | null }>({
-    step,
-    previous: null,
-  });
-  if (trail.step !== step) setTrail({ step, previous: trail.step });
+  /* The step before this one in history. « Retour » steps back to it when it
+     is the right target, so the button and the system gesture agree, and an
+     editor opened from the dishes returns to them. Read from history, not
+     from the last step shown: coming back to the editor from the dishes is
+     not opening it from them. */
+  const previousRoute = useAppStore((s) => s.previousRoute);
+  const goBack = useAppStore((s) => s.goBack);
+  const previousStep =
+    previousRoute?.name === 'receipt' && previousRoute.receiptId === receiptId
+      ? previousRoute.step
+      : null;
   const origin =
-    trail.previous === 'assign' || trail.previous === 'adjust' ? trail.previous : null;
+    previousStep === 'assign' || previousStep === 'adjust' ? previousStep : null;
 
   if (!receipt || receipt.id !== receiptId) {
     return (
@@ -140,6 +142,9 @@ export function ReceiptFlow({ groupId, receiptId, step }: ReceiptFlowProps) {
   const goTo = (next: FlowStep) =>
     navigate({ name: 'receipt', groupId, receiptId, step: next });
   const goToGroup = () => navigate({ name: 'group', groupId });
+  const backTo = (previous: FlowStep) =>
+    goBack({ name: 'receipt', groupId, receiptId, step: previous });
+  const backToGroup = () => goBack({ name: 'group', groupId });
 
   const chrome = (
     <>
@@ -155,7 +160,7 @@ export function ReceiptFlow({ groupId, receiptId, step }: ReceiptFlowProps) {
           {chrome}
           <CaptureScreen
             receipt={receipt}
-            onBack={goToGroup}
+            onBack={backToGroup}
             onDone={() => goTo('processing')}
             onSkip={receipt.lines.length > 0 ? () => goTo('assign') : undefined}
             onManual={() => goTo('verify')}
@@ -168,7 +173,7 @@ export function ReceiptFlow({ groupId, receiptId, step }: ReceiptFlowProps) {
           {chrome}
           <ProcessingScreen
             receipt={receipt}
-            onBack={() => goTo('capture')}
+            onBack={() => backTo('capture')}
             onDone={() => goTo('assign')}
             onManual={() => goTo('verify')}
             onRetake={() => goTo('capture')}
@@ -181,8 +186,8 @@ export function ReceiptFlow({ groupId, receiptId, step }: ReceiptFlowProps) {
           {chrome}
           <VerifyScreen
             receipt={receipt}
-            onBack={() => (origin ? goTo(origin) : receipt.imageId ? goTo('capture') : goToGroup())}
-            onDone={() => goTo(origin ?? 'assign')}
+            onBack={() => (origin ? backTo(origin) : receipt.imageId ? backTo('capture') : backToGroup())}
+            onDone={() => (origin ? backTo(origin) : goTo('assign'))}
           />
         </>
       );
@@ -192,10 +197,13 @@ export function ReceiptFlow({ groupId, receiptId, step }: ReceiptFlowProps) {
           {chrome}
           <AssignScreen
             receipt={receipt}
-            /* Back from the dishes leaves the receipt rather than reopening the
+            /* Back from the dishes returns to the verification it came from;
+               after a reading, it leaves the receipt rather than reopening the
                photo, whose main action re-reads it. The photo stays reachable
                from the menu. */
-            onBack={() => (receipt.imageId ? goToGroup() : goTo('verify'))}
+            onBack={() =>
+              previousStep === 'verify' || !receipt.imageId ? backTo('verify') : backToGroup()
+            }
             onEditLines={() => goTo('verify')}
             onRetakePhoto={receipt.imageId ? () => goTo('capture') : undefined}
             onDone={() => goTo('adjust')}
@@ -208,7 +216,7 @@ export function ReceiptFlow({ groupId, receiptId, step }: ReceiptFlowProps) {
           {chrome}
           <AdjustScreen
             receipt={receipt}
-            onBack={() => goTo('assign')}
+            onBack={() => backTo('assign')}
             onEditLines={() => goTo('verify')}
             onDone={() => goTo('results')}
           />
@@ -218,7 +226,7 @@ export function ReceiptFlow({ groupId, receiptId, step }: ReceiptFlowProps) {
       return (
         <>
           {chrome}
-          <ResultsScreen receipt={receipt} onBack={() => goTo('adjust')} onHome={goToGroup} />
+          <ResultsScreen receipt={receipt} onBack={() => backTo('adjust')} onHome={goToGroup} />
         </>
       );
     default:

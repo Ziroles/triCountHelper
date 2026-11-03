@@ -25,7 +25,7 @@ function formatBytes(bytes: number): string {
  * few characters, enough to recognise which one is in place.
  */
 export function SettingsScreen() {
-  const navigate = useAppStore((s) => s.navigate);
+  const goBack = useAppStore((s) => s.goBack);
   const settings = useAppStore((s) => s.settings);
   const server = useAppStore((s) => s.server);
   const geminiKey = useAppStore((s) => s.geminiKey);
@@ -80,7 +80,7 @@ export function SettingsScreen() {
   const noKeyAnywhere = !hasOwnKey && !server.serverHasGeminiKey;
 
   return (
-    <Screen title="Réglages" onBack={() => navigate({ name: 'groups' })}>
+    <Screen title="Réglages" onBack={() => goBack({ name: 'groups' })}>
       <section className="section">
         <h2>Lecture des tickets</h2>
         <p className="muted">

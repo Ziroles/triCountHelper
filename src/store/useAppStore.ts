@@ -27,7 +27,7 @@ import { newDeviceKek, open as openSealed, seal } from '../lib/crypto';
 import { logger } from '../lib/log';
 import { knownAccountEmail, rememberAccountEmail, requestPersistentStorage } from '../lib/session';
 import { colorForIndex } from '../lib/people';
-import { currentRoute, routeToPath } from '../lib/routing';
+import { currentRoute, historyEntry, routeToPath, sameRoute } from '../lib/routing';
 import {
   DEFAULT_SERVER_SETTINGS,
   DEFAULT_SETTINGS,
@@ -54,6 +54,8 @@ type State = {
   ready: boolean;
   online: boolean;
   route: Route;
+  /** The screen before this one in history, when known (not after a reload of an old entry). */
+  previousRoute: Route | null;
 
   settings: Settings;
   server: ServerSettings;
@@ -99,7 +101,13 @@ type Actions = {
   init: () => Promise<void>;
   navigate: (route: Route) => void;
   /** Route imposed by history: follow it without pushing it back on. */
-  adoptRoute: (route: Route) => void;
+  adoptRoute: (route: Route, previous?: Route | null) => void;
+  /**
+   * The on-screen « Retour »: steps back in history when the previous entry is
+   * `target`, so the system back gesture and this button agree; otherwise
+   * replaces the current entry, never adding one.
+   */
+  goBack: (target: Route) => void;
 
   refreshGroups: () => Promise<void>;
   openGroup: (groupId: string) => Promise<void>;
@@ -319,6 +327,7 @@ export const useAppStore = create<AppStore>((set, get) => {
     ready: false,
     online: typeof navigator === 'undefined' ? true : navigator.onLine,
     route: { name: 'groups' },
+    previousRoute: null,
 
     settings: DEFAULT_SETTINGS,
     server: DEFAULT_SERVER_SETTINGS,
@@ -382,12 +391,18 @@ export const useAppStore = create<AppStore>((set, get) => {
            reload open the expected screen, not the home page. */
         const opening = currentRoute();
         log.info('opening route', opening);
-        window.history.replaceState({ route: opening }, '', routeToPath(opening));
-        set({ route: opening });
+        const kept = historyEntry(window.history.state);
+        const openingPrevious = kept && sameRoute(kept.route, opening) ? kept.prev : null;
+        window.history.replaceState(
+          { route: opening, prev: openingPrevious },
+          '',
+          routeToPath(opening),
+        );
+        set({ route: opening, previousRoute: openingPrevious });
 
         window.addEventListener('popstate', (event) => {
-          const state = (event.state ?? null) as { route?: Route } | null;
-          get().adoptRoute(state?.route ?? currentRoute());
+          const entry = historyEntry(event.state);
+          get().adoptRoute(entry?.route ?? currentRoute(), entry?.prev ?? null);
         });
 
         /* Compatibility: the API and the app deploy separately, and a mismatch
@@ -424,19 +439,36 @@ export const useAppStore = create<AppStore>((set, get) => {
       log.info('navigation', route);
       cancelTimer();
       void push();
-      set({ route, loadError: null });
+      const prev = get().route;
       if (typeof window !== 'undefined') {
-        window.history.pushState({ route }, '', routeToPath(route));
+        window.history.pushState({ route, prev }, '', routeToPath(route));
       }
+      set({ route, previousRoute: prev, loadError: null });
     },
 
-    adoptRoute(route) {
+    adoptRoute(route, previous = null) {
       // The back gesture has already moved history: republishing the entry
       // would trap the user inside the app, unable to get out.
       log.info('back in history', route);
       cancelTimer();
       void push();
-      set({ route, loadError: null });
+      set({ route, previousRoute: previous, loadError: null });
+    },
+
+    goBack(target) {
+      const previous = get().previousRoute;
+      if (typeof window !== 'undefined' && previous && sameRoute(previous, target)) {
+        // popstate follows, and adopts the previous entry.
+        window.history.back();
+        return;
+      }
+      log.info('back, replacing', target);
+      cancelTimer();
+      void push();
+      if (typeof window !== 'undefined') {
+        window.history.replaceState({ route: target, prev: null }, '', routeToPath(target));
+      }
+      set({ route: target, previousRoute: null, loadError: null });
     },
 
     // ── Groups ───────────────────────────────────────────────────────────────

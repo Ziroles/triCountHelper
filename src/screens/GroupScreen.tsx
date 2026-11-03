@@ -47,6 +47,7 @@ export function GroupScreen({ groupId }: GroupScreenProps) {
   const loading = useAppStore((s) => s.loadingReceipts);
   const loadError = useAppStore((s) => s.loadError);
   const navigate = useAppStore((s) => s.navigate);
+  const goBack = useAppStore((s) => s.goBack);
   const openGroup = useAppStore((s) => s.openGroup);
   const createReceipt = useAppStore((s) => s.createReceipt);
   const removeReceipt = useAppStore((s) => s.removeReceipt);
@@ -77,7 +78,7 @@ export function GroupScreen({ groupId }: GroupScreenProps) {
   return (
     <Screen
       title={group?.title ?? 'Groupe'}
-      onBack={() => navigate({ name: 'groups' })}
+      onBack={() => goBack({ name: 'groups' })}
       banner={loadError ? <Banner tone="warn">{loadError}</Banner> : null}
       footer={
         <>
