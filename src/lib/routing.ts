@@ -73,3 +73,21 @@ export function currentRoute(): Route {
   if (typeof window === 'undefined') return HOME;
   return pathToRoute(window.location.pathname);
 }
+
+/** Same screen: same address. */
+export function sameRoute(a: Route, b: Route): boolean {
+  return routeToPath(a) === routeToPath(b);
+}
+
+/** What the app keeps in `history.state`: the screen, and the one before it. */
+export type HistoryEntry = { route: Route; prev: Route | null };
+
+/** Reads a history entry leniently: an old entry, or another page's, may carry anything. */
+export function historyEntry(state: unknown): HistoryEntry | null {
+  if (!state || typeof state !== 'object' || !('route' in state)) return null;
+  const { route, prev } = state as { route?: unknown; prev?: unknown };
+  const valid = (value: unknown): value is Route =>
+    !!value && typeof value === 'object' && typeof (value as { name?: unknown }).name === 'string';
+  if (!valid(route)) return null;
+  return { route, prev: valid(prev) ? prev : null };
+}

@@ -13,6 +13,7 @@ import { useAppStore } from '../store/useAppStore';
  */
 export function JoinGroupScreen() {
   const navigate = useAppStore((s) => s.navigate);
+  const goBack = useAppStore((s) => s.goBack);
   const joinGroup = useAppStore((s) => s.joinGroup);
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
@@ -38,7 +39,7 @@ export function JoinGroupScreen() {
   return (
     <Screen
       title="Lier un groupe Tricount"
-      onBack={() => navigate({ name: 'groups' })}
+      onBack={() => goBack({ name: 'groups' })}
       footer={
         <Button
           variant="primary"

@@ -87,6 +87,24 @@ describe('parcours d’un ticket', () => {
     await screen.findByText('Étape 2 sur 3');
   });
 
+  it('recule de la vérification aux plats puis au groupe, sans boucler', async () => {
+    const user = await open({ step: 'verify', lines: [lineOf('l1', 'Tartare', 3000)] });
+    await screen.findByRole('heading', { name: 'Vérification' });
+    const depth = window.history.length;
+
+    await user.click(screen.getByRole('button', { name: 'Continuer' }));
+    await screen.findByText('Étape 1 sur 3');
+    await user.click(screen.getByRole('button', { name: 'Retour' }));
+    await screen.findByRole('heading', { name: 'Vérification' });
+
+    // Back from the verification it was not opened from the dishes: it leaves.
+    await user.click(screen.getByRole('button', { name: 'Retour' }));
+    await screen.findByRole('button', { name: 'Nouveau ticket' });
+    // « Retour » stepped back in history: the system gesture agrees with it.
+    expect(window.history.length).toBe(depth + 1);
+    expect(window.location.pathname).toBe('/g/tTEST123456');
+  });
+
   it('quitte le ticket au retour depuis les plats, sans rouvrir la photo', async () => {
     const user = await open({
       step: 'assign',
