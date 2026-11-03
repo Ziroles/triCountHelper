@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Screen } from '../ui/Screen';
 import { Button } from '../ui/Button';
 import { Banner } from '../ui/Banner';
@@ -9,8 +9,7 @@ import { MenuButton, type MenuItem } from '../ui/MenuSheet';
 import { PhotoSheet } from '../ui/PhotoSheet';
 import { AmountInput } from '../ui/AmountInput';
 import { Segmented } from '../ui/Segmented';
-import { recall, remember } from '../lib/deviceMemory';
-import { assignmentsForDishes, type DishSplit } from '../lib/reconcile';
+import type { DishSplit } from '../lib/reconcile';
 import { uid } from '../lib/id';
 import { useAppStore } from '../store/useAppStore';
 import { useGroupPeople } from '../hooks/useGroupPeople';
@@ -76,30 +75,27 @@ export function AssignScreen({
   const [photoOpen, setPhotoOpen] = useState(false);
   const [discountFor, setDiscountFor] = useState<string | null>(null);
 
-  /* Discounts on some dishes are remembered on this device (see deviceMemory):
-     each dish shows the ones that apply to it. */
-  const [, rerender] = useReducer((n: number) => n + 1, 0);
-  const memory = recall(receipt.id);
+  /* Each dish shows the discounts that apply to it. */
   const discountsOn = (lineId: string): Adjustment[] =>
     receipt.adjustments.filter(
-      (adjustment) =>
-        adjustment.mode === 'assigned' && memory.dishes?.[adjustment.id]?.includes(lineId),
+      (adjustment) => adjustment.mode === 'lines' && adjustment.lineIds?.includes(lineId),
     );
 
   const addDishDiscount = (line: ReceiptLine, amountCents: number, label: string, split: DishSplit) => {
-    const assignments = assignmentsForDishes([line], people, split);
-    if (assignments.length === 0) return;
-    const id = uid();
-    remember(receipt.id, {
-      dishes: { ...memory.dishes, [id]: [line.id] },
-      dishSplit: { ...memory.dishSplit, [id]: split },
-    });
-    rerender();
+    if (people.length === 0) return;
     updateReceipt((current) => ({
       ...current,
       adjustments: [
         ...current.adjustments,
-        { id, label, amountCents: -Math.abs(amountCents), mode: 'assigned', assignments },
+        {
+          id: uid(),
+          label,
+          amountCents: -Math.abs(amountCents),
+          mode: 'lines',
+          assignments: [],
+          lineIds: [line.id],
+          split,
+        },
       ],
     }));
   };
@@ -245,7 +241,7 @@ export function AssignScreen({
                   <span className="dish__name">{lineTitle(line)}</span>
                   {caption ? <span className="dish__caption">{caption}</span> : null}
                   {discounts.map((adjustment) => {
-                    const count = memory.dishes?.[adjustment.id]?.length ?? 1;
+                    const count = adjustment.lineIds?.length ?? 1;
                     return (
                       <span key={adjustment.id} className="dish__discount num">
                         {adjustment.label.toLowerCase()} {formatAmount(adjustment.amountCents)}

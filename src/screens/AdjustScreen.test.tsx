@@ -9,6 +9,7 @@ import { reset, seedGroup, seedReceipt, state } from '../test/fakeApi';
 import { resetForTests, useAppStore } from '../store/useAppStore';
 import { DEFAULT_SERVER_SETTINGS, DEFAULT_SETTINGS, type Assignment, type ReceiptLine } from '../types';
 import { forgetEverything } from '../db';
+import { recall } from '../lib/deviceMemory';
 
 function lineOf(id: string, label: string, totalCents: number, assignments: Assignment[]): ReceiptLine {
   return {
@@ -112,9 +113,13 @@ describe('plats et ajustements', () => {
 
     await waitFor(() => {
       const adjustment = receipt()?.adjustments[0];
-      expect(adjustment?.mode).toBe('assigned');
-      expect(adjustment?.assignments).toEqual([{ personId: 'm-mathieu', shares: 3000 }]);
+      // The dishes travel with the receipt: every device follows them.
+      expect(adjustment?.mode).toBe('lines');
+      expect(adjustment?.lineIds).toHaveLength(1);
+      expect(adjustment?.split).toBe('prorata');
+      expect(adjustment?.assignments).toEqual([]);
     });
+    expect(recall(receipt()!.id).dishes).toBeUndefined();
     expect(screen.getByText('sur 1 plat, pour Mathieu')).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Continuer' }));
@@ -263,19 +268,52 @@ describe('plats et ajustements', () => {
     await user.click(screen.getByRole('button', { name: 'Mathieu' }));
     await user.click(screen.getByText('Tartare')); // Mathieu leaves
 
-    await waitFor(() =>
-      expect(receipt()?.adjustments[0]?.assignments).toEqual([{ personId: 'm-lea', shares: 3000 }]),
-    );
+    // Nothing to rewrite: the split is computed from the dishes.
     await user.click(screen.getByRole('button', { name: 'Continuer' }));
     expect(await screen.findByText('sur 1 plat, pour Léa')).toBeInTheDocument();
+    expect(receipt()?.adjustments[0]?.mode).toBe('lines');
 
     // Back to prorata: nothing assigned any more.
     await user.click(screen.getByRole('button', { name: 'Au prorata' }));
     await waitFor(() => {
       expect(receipt()?.adjustments[0]?.mode).toBe('proportional');
       expect(receipt()?.adjustments[0]?.assignments).toEqual([]);
+      expect(receipt()?.adjustments[0]?.lineIds).toBeUndefined();
     });
   });
+  it('suit les plats d’une remise choisie sur un autre appareil', async () => {
+    // Written elsewhere: this device remembers nothing of it.
+    seedReceipt('tTEST123456', {
+      merchant: 'Le Comptoir',
+      step: 'assign',
+      lines: [
+        lineOf('l1', 'Tartare', 3000, [{ personId: 'm-mathieu', shares: 1 }]),
+        lineOf('l2', 'Pâtes', 2000, [{ personId: 'm-lea', shares: 1 }]),
+      ],
+      adjustments: [
+        {
+          id: 'r1',
+          label: 'Remise',
+          amountCents: -600,
+          mode: 'lines',
+          assignments: [],
+          lineIds: ['l2'],
+          split: 'prorata',
+        },
+      ],
+    });
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(await screen.findByText('Colocation'));
+    await user.click(await screen.findByText('Le Comptoir'));
+    await screen.findByText('Étape 1 sur 3');
+    expect(await screen.findByText(/remise −6,00/)).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Continuer' }));
+    expect(await screen.findByText('sur 1 plat, pour Léa')).toBeInTheDocument();
+    expect(screen.queryByText(/autre appareil/)).not.toBeInTheDocument();
+  });
+
   it('partage une remise sur des plats à parts égales', async () => {
     const user = await openAdjustments();
 
@@ -290,6 +328,6 @@ describe('plats et ajustements', () => {
     await user.click(within(picker).getByRole('button', { name: 'Appliquer' }));
 
     expect(await screen.findByText('sur 1 plat, à parts égales, pour Mathieu')).toBeInTheDocument();
-    expect(receipt()?.adjustments[0]?.assignments.map((a) => a.shares)).toEqual([1]);
+    expect(receipt()?.adjustments[0]?.split).toBe('equal');
   });
 });

@@ -102,7 +102,16 @@ export type ReceiptLine = {
   isManual: boolean;
 };
 
-export type AdjustmentMode = 'proportional' | 'assigned';
+/**
+ * Who bears an adjustment:
+ *  - `proportional`: everyone, in proportion to what they owe;
+ *  - `assigned`: the people in `assignments`, by their shares;
+ *  - `lines`: the people who have the dishes in `lineIds`, in proportion to
+ *    their part of them (`prorata`) or one equal share each (`equal`).
+ */
+export type AdjustmentMode = 'proportional' | 'assigned' | 'lines';
+
+export type DiscountSplit = 'prorata' | 'equal';
 
 export type Adjustment = {
   id: string;
@@ -110,6 +119,10 @@ export type Adjustment = {
   amountCents: number;
   mode: AdjustmentMode;
   assignments: Assignment[];
+  /** Mode `lines` only: the dishes the adjustment applies to. */
+  lineIds?: string[];
+  /** Mode `lines` only; prorata when absent. */
+  split?: DiscountSplit;
 };
 
 export type ReceiptStatus = 'draft' | 'settled';

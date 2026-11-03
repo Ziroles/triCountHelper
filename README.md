@@ -224,6 +224,14 @@ Chaque ligne porte un indicateur de taxation, proposé par le modèle et corrige
 pourcentage : les arrondis de caisse varient, et c'est le papier qui a raison. Les taux ne sont
 conservés qu'à titre indicatif.
 
+### Remises
+
+Une remise se répartit au prorata de ce que chacun doit, ou **sur des plats** : seules les
+personnes de ces plats la portent, au prorata de leur part ou à parts égales. Le ticket garde
+les plats choisis (mode `lines`), pas le résultat : si un plat change de main, la remise suit,
+sur tous les appareils. Si ses plats disparaissent, elle repasse au prorata de tous — son
+montant est sur le ticket, il doit être réparti.
+
 ### Pourboire
 
 Le pourboire ne figure pas sur le ticket du commerçant : il n'entre donc pas dans le contrôle

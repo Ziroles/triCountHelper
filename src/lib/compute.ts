@@ -114,6 +114,31 @@ export function tipForPercent(
   return Math.round((base * tenths) / 1000);
 }
 
+/**
+ * Who bears a discount on some dishes, and by which weights: the people who
+ * have at least one of them, in proportion to their part (prorata) or one
+ * share each (equal). Null when nobody has any of them any more.
+ */
+function dishShares(
+  adjustment: Adjustment,
+  lineParts: ReadonlyMap<string, readonly number[]>,
+  count: number,
+): { targetIndexes: number[]; weights: number[] } | null {
+  const onDishes = new Array<number>(count).fill(0);
+  for (const id of new Set(adjustment.lineIds ?? [])) {
+    lineParts.get(id)?.forEach((amount, p) => {
+      onDishes[p] = (onDishes[p] as number) + amount;
+    });
+  }
+  const targetIndexes = onDishes.flatMap((amount, p) => (amount > 0 ? [p] : []));
+  if (targetIndexes.length === 0) return null;
+  const weights =
+    adjustment.split === 'equal'
+      ? targetIndexes.map(() => 1)
+      : targetIndexes.map((p) => onDishes[p] as number);
+  return { targetIndexes, weights };
+}
+
 type SettleInput = Pick<
   Receipt,
   'lines' | 'taxes' | 'adjustments' | 'statedTotalCents' | 'tipCents' | 'tipBasis'
@@ -135,6 +160,10 @@ export function settle(input: SettleInput, people: readonly Person[]): Settlemen
 
   const taxBase = new Map<string, number[]>();
   for (const tax of input.taxes) taxBase.set(tax.code, new Array<number>(count).fill(0));
+
+  /* Each line's amount per person: a discount on some dishes is shared
+     between the people who have them. */
+  const lineParts = new Map<string, number[]>();
 
   const unassignedLineIds: string[] = [];
   const autoSplitLineIds: string[] = [];
@@ -166,11 +195,14 @@ export function settle(input: SettleInput, people: readonly Person[]): Settlemen
     const weights = targets.map((a) => a.shares);
     const parts = splitCents(line.totalCents, weights, { tieBreak });
     const shareCount = targets.length;
+    const perPerson = new Array<number>(count).fill(0);
+    lineParts.set(line.id, perPerson);
 
     targets.forEach((assignment, i) => {
       const p = index.get(assignment.personId) as number;
       const amount = parts[i] as number;
       lines[p] = (lines[p] as number) + amount;
+      perPerson[p] = (perPerson[p] as number) + amount;
       lineCounts[p] = (lineCounts[p] as number) + 1;
       if (shareCount > 1) sharedLineCounts[p] = (sharedLineCounts[p] as number) + 1;
       else soloLineCounts[p] = (soloLineCounts[p] as number) + 1;
@@ -229,8 +261,12 @@ export function settle(input: SettleInput, people: readonly Person[]): Settlemen
   for (const adjustment of input.adjustments) {
     let targetIndexes: number[];
     let weights: number[];
+    const onDishes = adjustment.mode === 'lines' ? dishShares(adjustment, lineParts, count) : null;
 
-    if (adjustment.mode === 'assigned') {
+    if (onDishes) {
+      targetIndexes = onDishes.targetIndexes;
+      weights = onDishes.weights;
+    } else if (adjustment.mode === 'assigned') {
       const targets = adjustment.assignments.filter(
         (a) => index.has(a.personId) && a.shares > 0,
       );
@@ -238,6 +274,8 @@ export function settle(input: SettleInput, people: readonly Person[]): Settlemen
       targetIndexes = targets.map((a) => index.get(a.personId) as number);
       weights = targets.map((a) => a.shares);
     } else {
+      /* Prorata of what everyone owes — and the fallback of a discount whose
+         dishes are gone: its amount is on the receipt, it must land somewhere. */
       targetIndexes = order;
       weights = order.map((i) => {
         const due = (lines[i] as number) + (taxes[i] as number) + (adjustments[i] as number);

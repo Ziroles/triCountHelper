@@ -1,11 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { assignmentsForDishes, reconcile } from './reconcile';
-import type { Person, Receipt, ReceiptLine } from '../types';
-
-const people: Person[] = [
-  { id: 'a', name: 'Alice' },
-  { id: 'b', name: 'Bruno' },
-];
+import { reconcile } from './reconcile';
+import type { Adjustment, Receipt, ReceiptLine } from '../types';
 
 function line(id: string, totalCents: number, who: string[]): ReceiptLine {
   return {
@@ -44,83 +39,59 @@ function receiptOf(partial: Partial<Receipt>): Receipt {
   };
 }
 
+const legacy: Adjustment = {
+  id: 'd',
+  label: 'Remise',
+  amountCents: -500,
+  mode: 'assigned',
+  assignments: [{ personId: 'a', shares: 3000 }],
+};
+
 describe('reconcile', () => {
   it('ne réécrit rien quand tout est déjà à jour', () => {
     const receipt = receiptOf({ lines: [line('x', 1000, ['a'])], tipCents: 150 });
-    expect(reconcile(receipt, people, { tipPercent: 15 })).toBeNull();
-    expect(reconcile(receipt, people, {})).toBeNull();
+    expect(reconcile(receipt, { tipPercent: 15 })).toBeNull();
+    expect(reconcile(receipt, {})).toBeNull();
   });
 
   it('fait suivre au pourboire son pourcentage', () => {
     const receipt = receiptOf({ lines: [line('x', 2000, ['a'])], tipCents: 150 });
-    expect(reconcile(receipt, people, { tipPercent: 15 })?.tipCents).toBe(300);
-  });
-
-  it('fait suivre à une remise les personnes de ses plats', () => {
-    const receipt = receiptOf({
-      lines: [line('x', 3000, ['a', 'b']), line('y', 1000, ['a'])],
-      adjustments: [
-        { id: 'd', label: 'Remise', amountCents: -500, mode: 'assigned', assignments: [{ personId: 'a', shares: 3000 }] },
-      ],
-    });
-    const next = reconcile(receipt, people, { dishes: { d: ['x'] } });
-    expect(next?.adjustments[0]?.assignments).toEqual([
-      { personId: 'a', shares: 1500 },
-      { personId: 'b', shares: 1500 },
-    ]);
-  });
-
-  it('laisse une remise dont les plats ont disparu, ou repassée au prorata', () => {
-    const adjustments = [
-      { id: 'd', label: 'Remise', amountCents: -500, mode: 'assigned' as const, assignments: [{ personId: 'a', shares: 1 }] },
-      { id: 'e', label: 'Autre', amountCents: -100, mode: 'proportional' as const, assignments: [] },
-    ];
-    const receipt = receiptOf({ lines: [line('y', 1000, ['b'])], adjustments });
-    expect(reconcile(receipt, people, { dishes: { d: ['gone'], e: ['y'] } })).toBeNull();
-  });
-
-  it('partage entre tous un plat que personne n’a pris', () => {
-    expect(assignmentsForDishes([line('x', 1000, [])], people)).toEqual([
-      { personId: 'a', shares: 500 },
-      { personId: 'b', shares: 500 },
-    ]);
+    expect(reconcile(receipt, { tipPercent: 15 })?.tipCents).toBe(300);
   });
 });
 
-describe('remise sur des plats, à parts égales', () => {
-  const lea: Person = { id: 'l', name: 'Léa' };
-  const mat: Person = { id: 'm', name: 'Mathieu' };
-  const plateau = line('plateau', 3000, ['l', 'm']);
-  plateau.assignments = [
-    { personId: 'l', shares: 2 },
-    { personId: 'm', shares: 1 },
-  ];
-
-  it('au prorata : 20,00 et 10,00 sur le plateau', () => {
-    expect(assignmentsForDishes([plateau], [lea, mat], 'prorata')).toEqual([
-      { personId: 'l', shares: 2000 },
-      { personId: 'm', shares: 1000 },
-    ]);
-  });
-
-  it('à parts égales : une part chacun', () => {
-    expect(assignmentsForDishes([plateau], [lea, mat], 'equal')).toEqual([
-      { personId: 'l', shares: 1 },
-      { personId: 'm', shares: 1 },
-    ]);
-  });
-
-  it('suit une réattribution en gardant le partage égal', () => {
+describe('reconcile — remises sur des plats d’avant', () => {
+  it('confie au ticket les plats retenus sur cet appareil', () => {
     const receipt = receiptOf({
-      lines: [line('x', 1000, ['a', 'b'])],
-      adjustments: [
-        { id: 'r1', label: 'Remise', amountCents: -500, mode: 'assigned', assignments: [{ personId: 'a', shares: 1 }] },
-      ],
+      lines: [line('x', 3000, ['a', 'b']), line('y', 1000, ['a'])],
+      adjustments: [legacy],
     });
-    const next = reconcile(receipt, people, { dishes: { r1: ['x'] }, dishSplit: { r1: 'equal' } });
-    expect(next?.adjustments[0]?.assignments).toEqual([
-      { personId: 'a', shares: 1 },
-      { personId: 'b', shares: 1 },
-    ]);
+    const next = reconcile(receipt, { dishes: { d: ['x', 'gone'] }, dishSplit: { d: 'equal' } });
+    expect(next?.adjustments[0]).toEqual({
+      ...legacy,
+      mode: 'lines',
+      assignments: [],
+      lineIds: ['x'],
+      split: 'equal',
+    });
+  });
+
+  it('prend le prorata quand le partage n’était pas retenu', () => {
+    const receipt = receiptOf({ lines: [line('x', 3000, ['a'])], adjustments: [legacy] });
+    expect(reconcile(receipt, { dishes: { d: ['x'] } })?.adjustments[0]?.split).toBe('prorata');
+  });
+
+  it('laisse une remise dont les plats ont disparu, ou qui n’est pas sur des plats', () => {
+    const other: Adjustment = { ...legacy, id: 'e', mode: 'proportional', assignments: [] };
+    const receipt = receiptOf({ lines: [line('y', 1000, ['b'])], adjustments: [legacy, other] });
+    expect(reconcile(receipt, { dishes: { d: ['gone'], e: ['y'] } })).toBeNull();
+  });
+
+  it('ne touche plus une remise déjà passée sur ses plats', () => {
+    const receipt = receiptOf({
+      lines: [line('x', 1000, ['a'])],
+      adjustments: [{ ...legacy, mode: 'lines', assignments: [], lineIds: ['x'] }],
+    });
+    expect(reconcile(receipt, { dishes: { d: ['x'] } })).toBeNull();
   });
 });
